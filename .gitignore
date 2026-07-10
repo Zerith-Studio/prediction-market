@@ -1,0 +1,20 @@
+# Rust / Anchor
+/target
+/programs/*/target
+.anchor
+test-ledger
+
+# Go
+/backend/bin
+
+# Node / Next.js (frontend, when added)
+node_modules
+.next
+out
+
+# OS
+.DS_Store
+
+# Local env
+.env
+.env.local
