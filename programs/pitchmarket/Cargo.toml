@@ -1,0 +1,20 @@
+[package]
+name = "pitchmarket"
+version = "0.1.0"
+edition = "2021"
+description = "PitchMarket settlement program — Superteam x TxODDS World Cup hackathon"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "pitchmarket"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
+anchor-spl = "0.31.1"

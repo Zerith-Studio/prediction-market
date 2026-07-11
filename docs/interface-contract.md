@@ -95,6 +95,22 @@ REST: `POST /orders` (submit signed Order), `DELETE /orders/:hash`, `GET /market
 
 ---
 
+## 6.5. settle_match / combo_accept transaction layout (pinned 2026-07-09)
+
+Ed25519 signature verification is on-chain instruction introspection, not a program
+account. The crank MUST build each settle_match tx as exactly:
+```
+ix[0] = Ed25519Program.createInstructionWithPublicKey(taker.maker, borsh(taker), taker_sig)
+ix[1] = Ed25519Program.createInstructionWithPublicKey(maker.maker, borsh(maker), maker_sig)
+ix[2] = settle_match(...)
+```
+`settle_match` reads ix[0]/ix[1] via the instructions sysvar and asserts each one's
+(pubkey, message) matches (order.maker, borsh(order)) exactly — see
+`programs/pitchmarket/src/sig_verify.rs`. `combo_accept` will follow the same
+one-Ed25519-ix-per-signature pattern once implemented. Wrong order or omitted
+Ed25519 instructions fail closed with `BadSignature`, never silently skip
+verification.
+
 ## 6. Two Day-0 decisions to lock before coding
 1. **Custody model:** SPL `Approve` **delegate** (funds stay in user's ATA) **vs** per-user
    **Vault PDA** (deposit once). Delegate = more faithful to Polymarket; Vault = simpler crank.
