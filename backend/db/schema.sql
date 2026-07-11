@@ -2,15 +2,17 @@
 -- Chain (Anchor program PDAs) is authoritative for money/positions/settlement;
 -- this schema is the resting order book, soft-locks, RFQ, precision pools, and a
 -- read-cache/index of chain state for fast UI reads.
+--
+-- Everything is IF NOT EXISTS so store.Bootstrap can run it idempotently on boot.
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     privy_id    TEXT UNIQUE NOT NULL,
     wallet      TEXT UNIQUE NOT NULL, -- base58 Solana pubkey
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE matches (
+CREATE TABLE IF NOT EXISTS matches (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     txodds_fixture_id TEXT UNIQUE NOT NULL,
     home              TEXT NOT NULL,
@@ -20,7 +22,7 @@ CREATE TABLE matches (
     live_state        JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE TABLE markets (
+CREATE TABLE IF NOT EXISTS markets (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     market_id       BYTEA UNIQUE NOT NULL, -- [u8;32] on-chain market_id
     match_id        UUID NOT NULL REFERENCES matches(id),
@@ -36,9 +38,19 @@ CREATE TABLE markets (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Demo mirror of vault USDC balances (micro-USDC). The vault-owned ATAs on chain
+-- are authoritative; usdc_locked is the E2 soft-lock (UX only, interface-contract §6.2).
+CREATE TABLE IF NOT EXISTS balances (
+    wallet          TEXT PRIMARY KEY,
+    usdc_available  BIGINT NOT NULL DEFAULT 0 CHECK (usdc_available >= 0),
+    usdc_locked     BIGINT NOT NULL DEFAULT 0 CHECK (usdc_locked >= 0)
+);
+
 -- order fill-accounting is authoritative on-chain (OrderStatus PDA); `remaining`
 -- here mirrors it for book/UX reads and is not the source of truth.
-CREATE TABLE orders (
+-- `locked` = residual soft-locked collateral attributed to this order:
+-- micro-USDC for BUY (price×size+fee at entry), outcome tokens for SELL.
+CREATE TABLE IF NOT EXISTS orders (
     order_hash  BYTEA PRIMARY KEY, -- sha256(borsh(Order))
     market_id   BYTEA NOT NULL REFERENCES markets(market_id),
     maker       TEXT NOT NULL,
@@ -51,13 +63,14 @@ CREATE TABLE orders (
     expiry      TIMESTAMPTZ,
     salt        BIGINT NOT NULL,
     sig         BYTEA NOT NULL,
+    locked      BIGINT NOT NULL DEFAULT 0 CHECK (locked >= 0),
     status      TEXT NOT NULL DEFAULT 'live' CHECK (status IN ('live','matched','cancelled')),
     created_seq BIGSERIAL
 );
-CREATE INDEX orders_book_idx ON orders (market_id, outcome, side, price, created_seq)
+CREATE INDEX IF NOT EXISTS orders_book_idx ON orders (market_id, outcome, side, price, created_seq)
     WHERE status = 'live';
 
-CREATE TABLE fills (
+CREATE TABLE IF NOT EXISTS fills (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     market_id   BYTEA NOT NULL REFERENCES markets(market_id),
     taker_hash  BYTEA NOT NULL REFERENCES orders(order_hash),
@@ -70,27 +83,44 @@ CREATE TABLE fills (
 );
 
 -- mirror of chain balances for fast UI; chain is authoritative.
-CREATE TABLE positions_cache (
+-- *_locked = tokens soft-locked under live SELL orders (UX only).
+CREATE TABLE IF NOT EXISTS positions_cache (
     "user"      TEXT NOT NULL,
     market_id   BYTEA NOT NULL REFERENCES markets(market_id),
-    yes         BIGINT NOT NULL DEFAULT 0,
-    no          BIGINT NOT NULL DEFAULT 0,
+    yes         BIGINT NOT NULL DEFAULT 0 CHECK (yes >= 0),
+    no          BIGINT NOT NULL DEFAULT 0 CHECK (no >= 0),
+    yes_locked  BIGINT NOT NULL DEFAULT 0 CHECK (yes_locked >= 0),
+    no_locked   BIGINT NOT NULL DEFAULT 0 CHECK (no_locked >= 0),
     avg_cost    BIGINT NOT NULL DEFAULT 0,
-    PRIMARY KEY ("user", market_id)
+    PRIMARY KEY ("user", market_id),
+    CHECK (yes >= yes_locked),
+    CHECK (no >= no_locked)
 );
 
-CREATE TABLE combo_quotes (
+CREATE TABLE IF NOT EXISTS combo_quotes (
     quote_hash  BYTEA PRIMARY KEY, -- sha256(borsh(ComboQuote))
+    rfq_id      UUID, -- the RFQ request this quote answers (null = unsolicited)
     maker       TEXT NOT NULL,
     legs        JSONB NOT NULL, -- [{market_id, outcome}]
     stake       BIGINT NOT NULL,
     payout      BIGINT NOT NULL,
     expiry      TIMESTAMPTZ,
     salt        BIGINT NOT NULL,
+    sig         BYTEA NOT NULL,
     status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','accepted','expired'))
 );
 
-CREATE TABLE combo_escrows (
+-- RFQ requests: a taker asks for quotes on a leg combination (ADR 0004).
+CREATE TABLE IF NOT EXISTS combo_rfqs (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    taker       TEXT NOT NULL,
+    legs        JSONB NOT NULL, -- [{market_id, outcome}]
+    stake       BIGINT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','quoted','accepted','expired')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS combo_escrows (
     quote_hash  BYTEA PRIMARY KEY REFERENCES combo_quotes(quote_hash),
     taker       TEXT NOT NULL,
     status      TEXT NOT NULL CHECK (status IN ('accepted','won','lost','void')),
@@ -98,7 +128,7 @@ CREATE TABLE combo_escrows (
     resolve_tx  TEXT
 );
 
-CREATE TABLE precision_entries (
+CREATE TABLE IF NOT EXISTS precision_entries (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     market_id   BYTEA NOT NULL REFERENCES markets(market_id),
     "user"      TEXT NOT NULL,
@@ -110,7 +140,7 @@ CREATE TABLE precision_entries (
     UNIQUE (market_id, "user") -- one entry per (user, market) — anti-gaming, ADR 0006
 );
 
-CREATE TABLE oneliners (
+CREATE TABLE IF NOT EXISTS oneliners (
     market_id     BYTEA NOT NULL REFERENCES markets(market_id),
     lines         JSONB NOT NULL,
     generated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
