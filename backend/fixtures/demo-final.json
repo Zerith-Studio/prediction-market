@@ -1,0 +1,10 @@
+[
+  {"offset_ms": 0, "event": {"fixture_id": "demo-final", "type": "odds", "payload": {"prices": {"home_win": 45, "draw": 28, "away_win": 30, "over_2_5": 55, "btts": 60}}}},
+  {"offset_ms": 2000, "event": {"fixture_id": "demo-final", "type": "kickoff", "payload": {"minute": 0}}},
+  {"offset_ms": 4000, "event": {"fixture_id": "demo-final", "type": "odds", "payload": {"prices": {"home_win": 47, "draw": 27, "away_win": 29, "over_2_5": 54, "btts": 59}}}},
+  {"offset_ms": 6000, "event": {"fixture_id": "demo-final", "type": "score", "payload": {"home_goals": 1, "away_goals": 0, "minute": 23}}},
+  {"offset_ms": 8000, "event": {"fixture_id": "demo-final", "type": "odds", "payload": {"prices": {"home_win": 62, "draw": 20, "away_win": 18, "over_2_5": 60, "btts": 55}}}},
+  {"offset_ms": 10000, "event": {"fixture_id": "demo-final", "type": "score", "payload": {"home_goals": 1, "away_goals": 1, "minute": 58}}},
+  {"offset_ms": 12000, "event": {"fixture_id": "demo-final", "type": "score", "payload": {"home_goals": 2, "away_goals": 1, "minute": 79}}},
+  {"offset_ms": 15000, "event": {"fixture_id": "demo-final", "type": "full_time", "payload": {"home_goals": 2, "away_goals": 1, "total_passes": 934, "minute": 90}}}
+]
