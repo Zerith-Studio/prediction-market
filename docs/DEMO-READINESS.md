@@ -97,6 +97,36 @@ live TxLINE-fed server. See progress.md changelog.
 | DB tests flake on Neon network blips | n/a for demo | Test-only. `dial error`/`no such host` = re-run; not a code bug. |
 | WS reconnect storm if backend restarts | low | Client backs off (1→8s). Don't restart the backend during the demo. |
 | Combo escrow is off-chain (on-chain `combo_accept` is stubbed) | by design | Sanctioned cut (ADR 0004 seam). Narrate combos as "escrowed by the exchange, resolved from the same on-chain outcomes." |
+| **Mirror-faucet wallets can't settle on-chain** | test-only | The `/wallet/deposit` faucet credits Postgres only — no `init_vault`, so no on-chain vault. Orders from such wallets match but revert at settle with `maker_vault AccountNotInitialized` (money stays safe via reconcile). **The frontend always uses the real two-step deposit** (`init_vault` + deposit), so real demo trades are unaffected. Only my test scripts left polluted orders. |
+
+## Live-match findings (2026-07-16, real England vs Argentina coverage)
+
+Running the fixed binary against the real match surfaced two more issues the
+adversarial suite couldn't — both **money-safe** (every failure reconciled, no
+funds lost), both fixed or documented:
+
+1. **Sticky LUT/ATA caches** (fixed, `6aaade6`) — a market whose lookup-table
+   or vault-ATA setup half-failed would revert *every* settle forever, because
+   the caches recorded success optimistically and never evicted. Now the LUT
+   cache recreates an unreadable table, the ATA cache only records verified
+   existence, and we wait for ATA visibility before settling (closing an
+   RPC-load-balancer read-after-write gap that caused `AccountNotInitialized`).
+
+2. **Stale mirror-funded orders in the book** (data hygiene) — `RestoreBooks`
+   reloads all live orders on restart, including ones left by mirror-faucet test
+   wallets that have no on-chain vault. Those match and revert at settle. **Not
+   a demo risk** (the frontend uses real deposits), but for a clean book before
+   the demo, clear the stale orders — scoped SQL:
+
+   ```sql
+   -- cancel only NON-bot resting orders (bot re-quotes fresh; keeps the ledger
+   -- honest by NOT zeroing locks — those test wallets are throwaway).
+   -- Replace <BOT_WALLET> with the "mmbot: running wallet=" value from the log.
+   UPDATE orders SET status = 'cancelled'
+   WHERE status = 'live' AND maker <> '<BOT_WALLET>';
+   ```
+
+   Or simplest for a fresh demo: point the server at a clean database.
 
 ## Run the suite yourself
 
