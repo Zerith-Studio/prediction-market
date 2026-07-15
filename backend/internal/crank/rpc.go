@@ -20,6 +20,9 @@ type RPCSubmitter struct {
 	Builder  *TxBuilder
 	Operator solana.PrivateKey
 	Tables   *LUTManager
+	// Chain, when set, pre-creates any missing vault token accounts before a
+	// settle (their associated_token constraints require existence).
+	Chain *ChainOps
 	// ConfirmTimeout bounds the poll for finalization (default 30s).
 	ConfirmTimeout time.Duration
 }
@@ -36,6 +39,13 @@ func NewRPCSubmitter(rpcURL string, builder *TxBuilder, operator solana.PrivateK
 }
 
 func (s *RPCSubmitter) SettleMatch(ctx context.Context, f matching.Fill) (string, error) {
+	if s.Chain != nil {
+		if err := s.Chain.EnsureSettleATAs(ctx, f.MarketID,
+			f.Taker.Order.Maker, f.Maker.Order.Maker,
+			f.Taker.Order.Outcome, f.Maker.Order.Outcome); err != nil {
+			return "", err
+		}
+	}
 	tableAddr, entries, err := s.Tables.EnsureTable(ctx, f)
 	if err != nil {
 		return "", fmt.Errorf("crank: lookup table: %w", err)
