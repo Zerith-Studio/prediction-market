@@ -21,6 +21,7 @@ type Position struct {
 	YesLocked uint64   `json:"yes_locked"`
 	NoLocked  uint64   `json:"no_locked"`
 	AvgCost   uint64   `json:"avg_cost"` // running average, price-cents
+	Realized  int64    `json:"realized"` // micro-USDC, Σ (exec − avg_cost)·size on sells
 }
 
 // Deposit mirrors an on-chain vault deposit into the demo ledger
@@ -59,7 +60,7 @@ func (s *Store) GrantTokens(ctx context.Context, wallet string, marketID [32]byt
 
 func (s *Store) GetPositions(ctx context.Context, wallet string) ([]Position, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT "user", market_id, yes, no, yes_locked, no_locked, avg_cost
+		SELECT "user", market_id, yes, no, yes_locked, no_locked, avg_cost, realized
 		FROM positions_cache WHERE "user" = $1`, wallet)
 	if err != nil {
 		return nil, err
@@ -69,7 +70,7 @@ func (s *Store) GetPositions(ctx context.Context, wallet string) ([]Position, er
 	for rows.Next() {
 		var p Position
 		var marketID []byte
-		if err := rows.Scan(&p.Wallet, &marketID, &p.Yes, &p.No, &p.YesLocked, &p.NoLocked, &p.AvgCost); err != nil {
+		if err := rows.Scan(&p.Wallet, &marketID, &p.Yes, &p.No, &p.YesLocked, &p.NoLocked, &p.AvgCost, &p.Realized); err != nil {
 			return nil, err
 		}
 		copy(p.MarketID[:], marketID)

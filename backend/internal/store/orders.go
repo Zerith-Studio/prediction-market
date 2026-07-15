@@ -232,6 +232,14 @@ func (s *Store) ApplyFill(ctx context.Context, f matching.Fill) (string, error) 
 					-int64(d.tokenMove), -int64(d.unlock), 0); err != nil {
 					return err
 				}
+				// Realized PnL: proceeds vs the running average cost basis.
+				if _, err := tx.Exec(ctx, fmt.Sprintf(`
+					UPDATE positions_cache
+					SET realized = realized + ($3::bigint - avg_cost) * $4::bigint * %d
+					WHERE "user" = $1 AND market_id = $2`, models.MicroPerCent),
+					d.wallet, f.MarketID[:], int64(d.execPrice), int64(d.tokenMove)); err != nil {
+					return fmt.Errorf("store: realized pnl: %w", err)
+				}
 				if _, err := tx.Exec(ctx, `
 					INSERT INTO balances (wallet, usdc_available) VALUES ($1, $2)
 					ON CONFLICT (wallet) DO UPDATE SET usdc_available = balances.usdc_available + $2`,
@@ -295,6 +303,13 @@ func (s *Store) RevertFill(ctx context.Context, fillID string, f matching.Fill) 
 			} else {
 				if err := applyPositionDelta(ctx, tx, d.wallet, f.MarketID[:], d.outcome,
 					int64(d.tokenMove), int64(d.unlock), 0); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, fmt.Sprintf(`
+					UPDATE positions_cache
+					SET realized = realized - ($3::bigint - avg_cost) * $4::bigint * %d
+					WHERE "user" = $1 AND market_id = $2`, models.MicroPerCent),
+					d.wallet, f.MarketID[:], int64(d.execPrice), int64(d.tokenMove)); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(ctx, `

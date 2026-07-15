@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS positions_cache (
     yes_locked  BIGINT NOT NULL DEFAULT 0 CHECK (yes_locked >= 0),
     no_locked   BIGINT NOT NULL DEFAULT 0 CHECK (no_locked >= 0),
     avg_cost    BIGINT NOT NULL DEFAULT 0,
+    realized    BIGINT NOT NULL DEFAULT 0, -- micro-USDC: Σ (exec − avg_cost)·size on sells
     PRIMARY KEY ("user", market_id),
     CHECK (yes >= yes_locked),
     CHECK (no >= no_locked)
