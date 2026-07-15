@@ -95,7 +95,17 @@ REST: `POST /orders` (submit signed Order), `DELETE /orders/:hash`, `GET /market
 
 ---
 
-## 6.5. settle_match / combo_accept transaction layout (pinned 2026-07-09)
+## 6. Two Day-0 decisions to lock before coding
+1. **Custody model:** SPL `Approve` **delegate** (funds stay in user's ATA) **vs** per-user
+   **Vault PDA** (deposit once). Delegate = more faithful to Polymarket; Vault = simpler crank.
+   **Recommend Vault PDA for the hackathon** (one deposit tx, simpler accounts). Pick one.
+2. **Reconciliation:** E2 soft-locks are UX only; the chain is truth. On a `settle_match` /
+   `combo_accept` **revert**, E2 must unwind its soft-lock and re-emit `order_update`. Define the
+   revert→reconcile path Day 0 so a losing race is a no-op, not a stuck order.
+
+---
+
+## 6.5. settle_match / combo_accept transaction layout (pinned 2026-07-09; v0 pinned 2026-07-12)
 
 Ed25519 signature verification is on-chain instruction introspection, not a program
 account. The crank MUST build each settle_match tx as exactly:
@@ -111,11 +121,10 @@ one-Ed25519-ix-per-signature pattern once implemented. Wrong order or omitted
 Ed25519 instructions fail closed with `BadSignature`, never silently skip
 verification.
 
-## 6. Two Day-0 decisions to lock before coding
-1. **Custody model:** SPL `Approve` **delegate** (funds stay in user's ATA) **vs** per-user
-   **Vault PDA** (deposit once). Delegate = more faithful to Polymarket; Vault = simpler crank.
-   **Recommend Vault PDA for the hackathon** (one deposit tx, simpler accounts). Pick one.
-2. **Reconciliation:** E2 soft-locks are UX only; the chain is truth. On a `settle_match` /
-   `combo_accept` **revert**, E2 must unwind its soft-lock and re-emit `order_update`. Define the
-   revert→reconcile path Day 0 so a losing race is a no-op, not a stuck order.
-```
+**Transaction version (pinned 2026-07-12):** the full 3-ix tx exceeds the 1232-byte
+legacy limit (~1453 B measured). The crank MUST submit it as a **v0 transaction** with a
+per-market **Address Lookup Table** holding the market's static accounts + each trading
+wallet's vault/ATAs. The operator (fee payer/signer) and the two per-order `OrderStatus`
+PDAs stay static keys — OrderStatus PDAs are unique per order, and keeping them inline
+avoids a table-extend + activation wait on every settle. Reference implementations:
+`backend/internal/crank/{builder,lut}.go` (Go, production) and `tests/helpers.ts` (TS).

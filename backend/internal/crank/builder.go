@@ -143,11 +143,73 @@ func (b *TxBuilder) SettleMatchInstructions(f matching.Fill, operator solana.Pub
 	}, nil
 }
 
-// BuildSettleMatchTx assembles the unsigned transaction (operator = fee payer).
+// BuildSettleMatchTx assembles the unsigned LEGACY transaction (operator = fee
+// payer). ⚠️ The full settle tx is 1453 bytes — OVER the 1232-byte legacy limit
+// (progress.md §2 finding) — so this only serializes for tests; on-chain
+// submission must go through BuildSettleMatchTxV0.
 func (b *TxBuilder) BuildSettleMatchTx(f matching.Fill, operator solana.PublicKey, blockhash solana.Hash) (*solana.Transaction, error) {
 	ixs, err := b.SettleMatchInstructions(f, operator)
 	if err != nil {
 		return nil, err
 	}
 	return solana.NewTransaction(ixs, blockhash, solana.TransactionPayer(operator))
+}
+
+// LookupAddresses returns the settle accounts eligible for the market's address
+// lookup table: everything except the operator (fee payer/signer must stay a
+// static key) and the two per-order OrderStatus PDAs (unique per order — putting
+// them in the table would force an extend + activation wait on EVERY settle;
+// keeping them static costs 64 bytes and keeps the table contents stable per
+// (market, wallet) pair). Top-level program ids (ed25519, pitchmarket) are
+// omitted too — the runtime forbids invoked programs from tables.
+func (b *TxBuilder) LookupAddresses(f matching.Fill) (solana.PublicKeySlice, error) {
+	// NB: the operator placeholder below must NOT be the zero key — that IS the
+	// system program's address, which legitimately belongs in the table. The
+	// operator is excluded via the IsSigner check instead.
+	placeholder := solana.MustPublicKeyFromBase58("Sysvar1111111111111111111111111111111111111")
+	ixs, err := b.SettleMatchInstructions(f, placeholder)
+	if err != nil {
+		return nil, err
+	}
+	skip := map[solana.PublicKey]bool{}
+	takerStatus, err := pda(b.ProgramID, []byte("ostatus"), f.Taker.Hash[:])
+	if err != nil {
+		return nil, err
+	}
+	makerStatus, err := pda(b.ProgramID, []byte("ostatus"), f.Maker.Hash[:])
+	if err != nil {
+		return nil, err
+	}
+	skip[takerStatus] = true
+	skip[makerStatus] = true
+
+	var out solana.PublicKeySlice
+	seen := map[solana.PublicKey]bool{}
+	for _, meta := range ixs[2].Accounts() {
+		k := meta.PublicKey
+		if skip[k] || seen[k] || meta.IsSigner {
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	return out, nil
+}
+
+// BuildSettleMatchTxV0 assembles the v0 transaction against the market's
+// lookup table (tableAddr → its current address list). This is the ONLY form
+// that fits on-chain; interface-contract §6.5's 3-instruction order is
+// unchanged, just compiled with lookups.
+func (b *TxBuilder) BuildSettleMatchTxV0(f matching.Fill, operator solana.PublicKey,
+	blockhash solana.Hash, tableAddr solana.PublicKey, tableEntries solana.PublicKeySlice) (*solana.Transaction, error) {
+	ixs, err := b.SettleMatchInstructions(f, operator)
+	if err != nil {
+		return nil, err
+	}
+	return solana.NewTransaction(ixs, blockhash,
+		solana.TransactionPayer(operator),
+		solana.TransactionAddressTables(map[solana.PublicKey]solana.PublicKeySlice{
+			tableAddr: tableEntries,
+		}),
+	)
 }
