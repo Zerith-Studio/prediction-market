@@ -100,7 +100,8 @@ real Postgres (Neon; each test run creates and drops a scratch database).
 | `feed` | ✅ | `replay` drives the lifecycle test; `txodds` SSE skeleton tested against a fake server — real endpoint shapes pending TxODDS reply. |
 | `oneliner` | ✅ | Claude Messages API client behind a Generator seam; 2-min ticker; tested with fake. Real API 🟡 (needs key at runtime). |
 | `index` | ✅ | OrderStatus mirror processor (chain wins) tested with fake source; RPC poller written 🟡 (needs deployed program). |
-| `cmd/server` | ✅ | Full wiring, env config (+ .env), graceful shutdown, `DEMO_FIXTURE` demo mode. See `.env.example`. |
+| `cmd/server` | ✅ | Full wiring, env config (+ .env), graceful shutdown, `DEMO_FIXTURE` demo mode, CORS for browser clients. See `.env.example`. |
+| `frontend/` | ✅ | Next.js app (E1's build) + motion-polish pass + **wired to the live exchange**: REST mapping (unified YES ladder from the outcome-indexed book), `/ws` stream (book/fill/oneliner/match_state), Privy embedded wallet behind `NEXT_PUBLIC_PRIVY_APP_ID` with a localStorage ed25519 demo wallet fallback, real order signing (borsh golden vector pinned as a 4th encoder, gated in `prebuild`). Browser-flow e2e green vs the real backend (fund → sign → 401/409 semantics → ladder → portfolio). Fixture mode still works with zero infra. |
 
 **Test-suite caveats:** DB-backed tests are slow (~300ms RTT to Neon per statement) and
 **network-flaky**: parallel packages contend on the shared endpoint, and even serialized
@@ -214,6 +215,7 @@ Newest first. One row per meaningful change. **Append here in the same commit as
 
 | Date | Who | What changed | Verified how |
 |---|---|---|---|
+| 2026-07-15 | Ashish | Frontend motion-polish pass (press feedback, state crossfades, sliding tab underline, scaleX depth bars, MotionConfig reduced-motion, touch-gated hovers); **wired frontend to the live exchange** (REST mapping + WS + Privy/demo wallet + real signing); CORS on the Go API; TS borsh encoder pinned to the golden vector in `npm run build` | `npm run build` ✅ (golden vector gate) · scripted browser-flow e2e vs `go run ./cmd/server` ✅: deposit → signed order accepted → bad sig 401 → replay 409 → ladder shows the bid → portfolio row |
 | 2026-07-15 | Ashish | **Program deployed to devnet** at the pinned ID; **Go crank settled a real match on devnet** (v0+ALT); gentler RPC polling in crank/harness (public devnet endpoint rate-limits) | `cmd/devnet-e2e` ✅ full run: initialize→vaults→deposits→engine MINT fill→**settle_match**→resolve→redeem, every balance asserted; tx sigs in §5 |
 | 2026-07-12 | Ashish | **Crank v0 + per-market ALT** (`crank/lut.go`, `BuildSettleMatchTxV0`); chain builders (initialize_market/init_vault/deposit/resolve/redeem) + `cmd/devnet-e2e` harness; committed program keypair (decision #1 closed); reproduced §4 fix on 2nd machine (Agave 4.1.1 → `.so` 419,400 B); pinned v0+ALT in interface-contract §6.5. **Devnet deploy blocked only on faucet SOL.** | `go test ./internal/crank` ✅ (v0 1116 B ≤ 1232, legacy 1421 B rejected; layout tests) · `cargo-build-sbf` ✅ on this machine · devnet run pending funds |
 | 2026-07-12 | Ashish | Merged PR #3 into main; reconciled this file across both tracks (E1 localnet results + E2 backend state + v0/ALT crank rework now tracked in §5/§7) | host `cargo test -p pitchmarket` ✅ · `go build`/`vet` + targeted Go suites ✅ on the merged tree |
