@@ -101,6 +101,66 @@ func extractLines(text string) ([]string, error) {
 	return lines, nil
 }
 
+// Gemini calls Google's generateContent API (no SDK dep).
+type Gemini struct {
+	APIKey string
+	Model  string
+	Client *http.Client
+}
+
+func NewGemini(apiKey, model string) *Gemini {
+	if model == "" {
+		model = "gemini-3.0-flash"
+	}
+	return &Gemini{APIKey: apiKey, Model: model, Client: &http.Client{Timeout: 30 * time.Second}}
+}
+
+func (g *Gemini) Lines(ctx context.Context, mc MatchContext) ([]string, error) {
+	prompt := fmt.Sprintf(
+		"Live football match %s vs %s. Live state: %s\nMarket: %%q (%s)\n"+
+			"Write exactly 6 one-liners (≤80 chars each) a sharp trader would enjoy — "+
+			"witty, specific to the state of this match and this market, no hashtags, no emoji. "+
+			"Return them as a JSON array of 6 strings and nothing else.",
+		mc.Home, mc.Away, mc.LiveState, mc.MarketRule)
+	prompt = fmt.Sprintf(prompt, mc.MarketTitle)
+
+	body, _ := json.Marshal(map[string]any{
+		"contents": []map[string]any{{"parts": []map[string]string{{"text": prompt}}}},
+	})
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
+		g.Model, g.APIKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("content-type", "application/json")
+
+	resp, err := g.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("oneliner: gemini status %d", resp.StatusCode)
+	}
+	var out struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	if len(out.Candidates) == 0 || len(out.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("oneliner: empty gemini response")
+	}
+	return extractLines(out.Candidates[0].Content.Parts[0].Text)
+}
+
 type Service struct {
 	store *store.Store
 	hub   *ws.Hub

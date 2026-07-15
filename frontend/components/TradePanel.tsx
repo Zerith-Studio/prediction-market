@@ -54,6 +54,7 @@ export function TradePanel({
     if (serverError) return serverError;
     if (!connected) return null; // the button becomes "Connect wallet"
     if (n <= 0) return "Enter a size to trade.";
+    if (side === "buy" && balanceMicro === 0) return "Vault is empty.";
     if (insufficient) return "Insufficient vault balance.";
     return null;
   }, [locked, connected, n, insufficient, serverError]);
@@ -68,14 +69,6 @@ export function TradePanel({
     }
     setServerError(null);
     setSubmit("signing");
-
-    if (!api.live) {
-      // Fixture mode keeps the real flow's rhythm without a backend.
-      setPlacedLabel("Resting on book");
-      window.setTimeout(() => setSubmit("placed"), 720);
-      window.setTimeout(() => setSubmit("idle"), 2600);
-      return;
-    }
 
     try {
       const salt = randomSalt();
@@ -113,11 +106,22 @@ export function TradePanel({
     }
   }
 
+  // Real deposit: the server builds an operator-cosigned devnet tx; the wallet
+  // signs its message bytes (the product's one signing moment). Falls back to
+  // the mirror faucet when the server runs off-chain.
   async function fund() {
     if (!wallet.address || funding) return;
     setFunding(true);
     try {
-      await api.deposit(wallet.address, 1_000_000_000); // 1,000 demo USDC
+      const amount = 1_000_000_000; // 1,000 demo USDC
+      const init = await api.depositInit(wallet.address, amount);
+      if (init) {
+        const msg = Uint8Array.from(atob(init.message_b64), (c) => c.charCodeAt(0));
+        const sig = await wallet.signMessage(msg);
+        await api.depositComplete(init.deposit_id, wallet.address, amount, toHex(sig));
+      } else {
+        await api.depositMirror(wallet.address, amount);
+      }
       setServerError(null);
       onPlaced?.();
     } catch (e) {
@@ -194,7 +198,7 @@ export function TradePanel({
             role="alert"
           >
             {error}
-            {insufficient && api.live && (
+            {side === "buy" && (insufficient || balanceMicro === 0) && (
               <button
                 onClick={fund}
                 disabled={funding}

@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { api, explorerAddr, explorerTx } from "@/lib/api";
-import { demoBalanceMicro } from "@/lib/fixtures";
 import type { Settlement } from "@/lib/types";
 import { usd } from "@/lib/format";
 import { TopBar } from "@/components/TopBar";
@@ -27,7 +26,7 @@ export default function SettlementPage({ params }: { params: { id: string } }) {
 
   return (
     <div className="min-h-screen">
-      <TopBar balanceMicro={demoBalanceMicro} />
+      <TopBar balanceMicro={0} />
       <main className="mx-auto max-w-[760px] px-5 sm:px-8">
         {!s && !err && <div className="py-24 font-mono text-[13px] text-dim">Loading…</div>}
         {err && <div className="py-24 font-mono text-[13px] text-down">Couldn’t load settlement.</div>}
@@ -61,7 +60,7 @@ export default function SettlementPage({ params }: { params: { id: string } }) {
                   Outcome and settlement are on devnet — check them yourself, don’t trust us.
                 </p>
               </div>
-              <VerifyLink href={explorerTx(s.timeline[2].tx!)}>View resolution</VerifyLink>
+              <VerifyLink href={explorerTx(s.timeline[0]?.tx ?? "")}>View resolution</VerifyLink>
             </div>
 
             {/* your result */}

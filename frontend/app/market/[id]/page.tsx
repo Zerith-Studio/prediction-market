@@ -59,8 +59,10 @@ export default function MarketPage({ params }: { params: { id: string } }) {
                   </p>
                 </div>
                 <div className="hidden text-right font-mono text-[12px] text-dim sm:block">
-                  <div className="text-muted tnum">$18.4k</div>
-                  <div>24h volume</div>
+                  <div className="text-muted tnum">
+                    {"$" + (m.fills.reduce((a, f) => a + f.price * f.size, 0) / 100).toLocaleString()}
+                  </div>
+                  <div>session volume</div>
                 </div>
               </div>
 

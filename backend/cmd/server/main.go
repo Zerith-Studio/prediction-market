@@ -138,7 +138,16 @@ func run(log *slog.Logger) error {
 			return err
 		}
 		bot = mmbot.New(ex, st, rfqSvc, priv, rand.New(rand.NewSource(time.Now().UnixNano())), log)
-		if err := bot.Fund(ctx, 100_000_000_000); err != nil {
+		const botBank = uint64(100_000_000_000) // 100k demo USDC
+		if chainOps != nil {
+			// The bot trades on-chain like everyone else: real vault, real USDC.
+			if tx, err := chainOps.DepositWithKey(ctx, solana.PrivateKey(priv), botBank); err != nil {
+				return errors.New("bot on-chain deposit: " + err.Error())
+			} else {
+				log.Info("mmbot: on-chain vault funded", "tx", tx)
+			}
+		}
+		if err := bot.Fund(ctx, botBank); err != nil {
 			return err
 		}
 		priceSink = bot
@@ -151,11 +160,17 @@ func run(log *slog.Logger) error {
 		lc.Creator = chainOps
 	}
 
-	// --- one-liners
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		ol := oneliner.New(st, hub, oneliner.NewClaude(key), log)
-		go ol.Run(ctx)
-		log.Info("oneliner: ticker running")
+	// --- one-liners (Gemini preferred when configured, else Claude)
+	var gen oneliner.Generator
+	if key := os.Getenv("GEMINI_API_KEY"); key != "" {
+		gen = oneliner.NewGemini(key, os.Getenv("GEMINI_MODEL"))
+		log.Info("oneliner: ticker running", "model", envOr("GEMINI_MODEL", "gemini-3.0-flash"))
+	} else if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		gen = oneliner.NewClaude(key)
+		log.Info("oneliner: ticker running", "model", "claude-haiku-4-5")
+	}
+	if gen != nil {
+		go oneliner.New(st, hub, gen, log).Run(ctx)
 	}
 
 	// --- chain index (mirror reconciliation)

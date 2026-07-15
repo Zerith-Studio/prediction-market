@@ -19,9 +19,10 @@ Legend: ✅ done & verified · 🟡 written but unverified · 🔴 not started /
 |---|---|
 | Deadline | **2026-07-15** (internal) · judged by 2026-07-29 |
 | Days left | **3** |
-| E1 program | ✅ **DEPLOYED TO DEVNET** at the pinned ID; full lifecycle proven on devnet |
-| E2 backend | ✅ complete; **Go crank settled a real match ON DEVNET** (v0+ALT) |
-| **Top blocker** | **frontend not started** — everything else on the floor is done |
+| E1 program | ✅ deployed on devnet; full lifecycle proven |
+| E2 backend | ✅ **ALL REAL DATA**: TxLINE live feed (free-tier on-chain subscription — no email needed), markets auto-created on devnet, UI trades settled by the crank on devnet, real two-step deposits |
+| Frontend | ✅ live-only (fixtures deleted): markets index, market page, **combos builder**, **precision pools**, portfolio with exit/cancel/realized+unrealized PnL (BBP mark) |
+| **Remaining** | deploy/hosting, demo recording, human browser click-through |
 
 **Honest summary.** Both halves of the trustless floor now work — separately. E1: the
 §4 toolchain blocker is fixed, the program compiles to BPF, and the full lifecycle
@@ -215,6 +216,7 @@ Newest first. One row per meaningful change. **Append here in the same commit as
 
 | Date | Who | What changed | Verified how |
 |---|---|---|---|
+| 2026-07-15 | Ashish | **Everything real, end to end.** TxLINE integration via the free World Cup tier (guest JWT → on-chain `subscribe` to txoracle `6pW64…` → activation; self-provisioning, cached) — England vs Argentina fixture live-priced (dnb 54¢). New TxLINE-priced templates (dnb_home w/ VOID, ou_1h_075) + per-market VOID resolution. Server on-chain mode: markets initialized/resolved on devnet, crank settles UI fills (CreateIdempotent ATA fix), two-step cosigned deposits, bot's own on-chain vault. Realized PnL on sells (+migration). Gemini one-liners. Frontend: fixtures.ts DELETED, markets index, combos RFQ builder (mutex greying, quote countdown), precision page (entry, distribution, leaderboard), portfolio exit/cancel + realized/unrealized PnL at best-bid mark, real deposit flow in TradePanel. | Scripted product e2e vs the LIVE stack: real deposit txs; fill → devnet settle `27VgrXKiLby34HiPorxTZYRBhK2R8zjn191sxK3MRtuADqJ3cBkHnaxV5txqHWFvpucq7ktMfAemXWydQj83M4qQ`; exit/cancel/precision ✓; combo quoted $5→$14.17 from live TxLINE prices, mutex rejected ✓ · Go suites + golden vector + `npm run build` ✅ · caveat: public devnet RPC 429s under load (index poll now 30s) |
 | 2026-07-15 | Ashish | Frontend motion-polish pass (press feedback, state crossfades, sliding tab underline, scaleX depth bars, MotionConfig reduced-motion, touch-gated hovers); **wired frontend to the live exchange** (REST mapping + WS + Privy/demo wallet + real signing); CORS on the Go API; TS borsh encoder pinned to the golden vector in `npm run build` | `npm run build` ✅ (golden vector gate) · scripted browser-flow e2e vs `go run ./cmd/server` ✅: deposit → signed order accepted → bad sig 401 → replay 409 → ladder shows the bid → portfolio row |
 | 2026-07-15 | Ashish | **Program deployed to devnet** at the pinned ID; **Go crank settled a real match on devnet** (v0+ALT); gentler RPC polling in crank/harness (public devnet endpoint rate-limits) | `cmd/devnet-e2e` ✅ full run: initialize→vaults→deposits→engine MINT fill→**settle_match**→resolve→redeem, every balance asserted; tx sigs in §5 |
 | 2026-07-12 | Ashish | **Crank v0 + per-market ALT** (`crank/lut.go`, `BuildSettleMatchTxV0`); chain builders (initialize_market/init_vault/deposit/resolve/redeem) + `cmd/devnet-e2e` harness; committed program keypair (decision #1 closed); reproduced §4 fix on 2nd machine (Agave 4.1.1 → `.so` 419,400 B); pinned v0+ALT in interface-contract §6.5. **Devnet deploy blocked only on faucet SOL.** | `go test ./internal/crank` ✅ (v0 1116 B ≤ 1232, legacy 1421 B rejected; layout tests) · `cargo-build-sbf` ✅ on this machine · devnet run pending funds |

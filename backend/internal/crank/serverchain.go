@@ -147,10 +147,43 @@ func (c *ChainOps) ensureATAIx(ctx context.Context, owner, mint solana.PublicKey
 		c.mu.Unlock()
 		return nil, nil
 	}
+	// CreateIdempotent: a no-op when the ATA already exists, so a transient
+	// RPC error on the existence check can never turn into a failed settle.
 	c.mu.Lock()
-	c.atas[key] = true // optimistic; a race just means a redundant create attempt
+	c.atas[key] = true
 	c.mu.Unlock()
-	return ata.NewCreateInstruction(c.Operator.PublicKey(), owner, mint).Build(), nil
+	create := ata.NewCreateIdempotentInstructionBuilder().
+		SetPayer(c.Operator.PublicKey()).
+		SetWallet(owner).
+		SetMint(mint)
+	return create.Build(), nil
+}
+
+// DepositWithKey performs the full deposit for a wallet whose key the server
+// holds (the MM bot): SOL top-up, USDC ATA + mint-to, init_vault, deposit —
+// operator and user both signed server-side.
+func (c *ChainOps) DepositWithKey(ctx context.Context, user solana.PrivateKey, amountMicro uint64) (string, error) {
+	id, _, err := c.PrepareDeposit(ctx, user.PublicKey(), amountMicro)
+	if err != nil {
+		return "", err
+	}
+	c.mu.Lock()
+	pd := c.deposits[id]
+	c.mu.Unlock()
+	if pd == nil {
+		return "", fmt.Errorf("crank: pending deposit vanished")
+	}
+	msg, err := pd.tx.Message.MarshalBinary()
+	if err != nil {
+		return "", err
+	}
+	userSig, err := user.Sign(msg)
+	if err != nil {
+		return "", err
+	}
+	var sig64 [64]byte
+	copy(sig64[:], userSig[:])
+	return c.CompleteDeposit(ctx, id, sig64)
 }
 
 // --- two-step real deposit -----------------------------------------------------

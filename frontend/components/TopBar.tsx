@@ -7,8 +7,7 @@ import { usePitchWallet } from "@/lib/wallet";
 
 const NAV: { label: string; href: string }[] = [
   { label: "Markets", href: "/" },
-  { label: "Combos", href: "#" },
-  { label: "Precision", href: "#" },
+  { label: "Combos", href: "/combos" },
   { label: "Portfolio", href: "/portfolio" },
 ];
 

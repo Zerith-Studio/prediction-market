@@ -147,3 +147,6 @@ CREATE TABLE IF NOT EXISTS oneliners (
     generated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (market_id, generated_at)
 );
+
+-- post-hoc migrations (idempotent) — columns added after first bootstrap
+ALTER TABLE positions_cache ADD COLUMN IF NOT EXISTS realized BIGINT NOT NULL DEFAULT 0;

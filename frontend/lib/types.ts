@@ -33,7 +33,7 @@ export interface Market {
   title: string;
   rule: string;
   status: MarketStatus;
-  outcome?: { winner?: "YES" | "NO"; value?: number } | null;
+  outcome?: { winner?: "YES" | "NO"; value?: number; void?: boolean } | null;
   chain_tx?: string;
 }
 
@@ -54,7 +54,8 @@ export interface Fill {
   price: number; // cents
   size: number; // shares
   match_type: "NORMAL" | "MINT" | "MERGE";
-  ts: number; // unix ms (client-side for the demo)
+  settle_tx?: string; // devnet signature once the crank confirms
+  ts: number; // unix ms
 }
 
 export type Side = "buy" | "sell";
@@ -70,7 +71,7 @@ export interface Settlement {
   title: string;
   scoreline: string; // "Brazil 2 – 0 Argentina"
   status: MarketStatus;
-  winner: "YES" | "NO";
+  winner: "YES" | "NO" | "VOID";
   resolved_by: string; // "TxODDS signed outcome (tier-a)"
   program_id: string;
   deploy_tx: string;
@@ -85,11 +86,13 @@ export interface Position {
   yes: number;
   no: number;
   avg_cost: number; // cents
-  current: number; // cents, current YES price
+  current: number; // cents — best bid (BBP): the price the position exits at now
+  realized: number; // micro-USDC, booked on sells
 }
 
 export interface OpenOrder {
   order_hash: string;
+  market_id: string;
   title: string;
   outcome: "YES" | "NO";
   side: Side;
