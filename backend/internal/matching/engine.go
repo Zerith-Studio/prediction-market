@@ -42,6 +42,7 @@ type Fill struct {
 var (
 	ErrBadPrice   = errors.New("matching: price must be 1..99")
 	ErrBadSize    = errors.New("matching: size must be > 0")
+	ErrSizeTooBig = errors.New("matching: size exceeds the sane maximum")
 	ErrExpired    = errors.New("matching: order already expired")
 	ErrDuplicate  = errors.New("matching: order hash already seen (replay)")
 	ErrBadOutcome = errors.New("matching: outcome must be 0 or 1")
@@ -84,6 +85,9 @@ func validate(o *models.Order, now time.Time) error {
 	}
 	if o.Size == 0 {
 		return ErrBadSize
+	}
+	if o.Size > models.MaxOrderSize {
+		return ErrSizeTooBig
 	}
 	if o.Outcome > 1 {
 		return ErrBadOutcome
