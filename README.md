@@ -4,6 +4,8 @@ Superteam × TxODDS World Cup Hackathon — "Prediction Markets & Settlement" tr
 
 **Current status, blockers, and next actions live in [`progress.md`](progress.md).**
 Read it before you start. Update it when you finish — see [`CLAUDE.md`](CLAUDE.md).
+**Picking the project up? Start with [`docs/HANDOFF.md`](docs/HANDOFF.md)** — what's
+proven on devnet, runbooks, invariants, and the remaining punch list.
 
 Full design: `PROJECT_PLAN.md` + `docs/adr/` (0001–0007) + `docs/interface-contract.md`
 (the E1↔E2 boundary — read this first, it's the source of truth both tracks code against).

@@ -182,9 +182,12 @@ usually landed (check `solana confirm`).
 
 ## 7. Next actions
 
+**Full handoff (runbooks, invariants, punch list with code seams): `docs/HANDOFF.md`.**
+
 **E2:** **frontend** — the last unstarted scope, with the deadline TODAY. The backend
-serves everything it needs; wire `SOLANA_RPC_URL`/`OPERATOR_KEYPAIR` env to run the
-server in on-chain mode against the deployed program.
+serves everything it needs (HANDOFF §5.1 is the API contract); wire
+`SOLANA_RPC_URL`/`OPERATOR_KEYPAIR` env to run the server in on-chain mode against the
+deployed program. Then HANDOFF §5.2 (on-chain market lifecycle wiring).
 
 **E1:** `combo_accept` / `resolve_combo` → oracle tier d if TxODDS replies (cut-safe:
 combos run off-chain behind the interface seam).
