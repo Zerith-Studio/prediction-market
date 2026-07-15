@@ -13,54 +13,73 @@ Legend: ✅ done & verified · 🟡 written but unverified · 🔴 not started /
 
 ---
 
-## 1. Status at a glance — 2026-07-11 (Day 7 of 11, Go/No-Go day)
+## 1. Status at a glance — 2026-07-12 (Day 8 of 11)
 
 | | |
 |---|---|
 | Deadline | **2026-07-15** (internal) · judged by 2026-07-29 |
-| Days left | **4** |
-| Go/No-Go gate | **TODAY EOD** — binary settlement end-to-end on devnet (PROJECT_PLAN §7) |
-| E2 backend | ✅ **complete and tested end-to-end** (off-chain mirror mode) |
-| **Top blocker** | **unchanged: `anchor build` fails → nothing deployed → no on-chain settlement.** See §4. |
+| Days left | **3** |
+| E1 program | ✅ builds to BPF; **full lifecycle green on localnet** (8/8 TS tests) — not yet devnet |
+| E2 backend | ✅ complete and tested end-to-end (off-chain mirror mode) |
+| **Top blockers** | **1) devnet deploy (keypair, decision #1) · 2) Go crank must emit v0 tx + ALT (§2 finding) · 3) frontend not started** |
 
-**Honest summary.** E2 is done: the full backend — matching (all three match types),
-Postgres mirror with soft-locks, ed25519 intake verification, crank tx builder producing
-the exact §6.5 layout, WS hub, RFQ combos, precision pools, MM bot, feed lifecycle,
-one-liners, chain index — builds, and passes an end-to-end suite against real Postgres
-(signed orders over HTTP → MINT fill → crank capture → WS events → portfolio →
-resolution → payout, plus the revert→reconcile path). **What it is NOT: on-chain.** The
-crank runs in off-chain mirror mode because the program still won't compile to BPF (§4).
-The moment `anchor build` is green and the program is deployed, settlement flips on by
-setting two env vars — no code changes expected on the E2 side.
-
-**Gate call (per PROJECT_PLAN §7):** if E1's toolchain isn't unblocked today, the demo
-falls back to "everything real except the on-chain leg" — which is now a much softer
-landing than it was yesterday, but it is still a **No-Go** on the trustless story until
-§4 closes.
+**Honest summary.** Both halves of the trustless floor now work — separately. E1: the
+§4 toolchain blocker is fixed, the program compiles to BPF, and the full lifecycle
+(`initialize_market → deposit → settle_match (NORMAL/MINT/MERGE) → cancel fail-closed →
+resolve_market → redeem`) runs green on `solana-test-validator` with balance assertions;
+`sig_verify` executed for real. E2: the whole backend (matching, Postgres mirror,
+crank builder, API/WS, RFQ, precision, bot, lifecycle) passes an HTTP end-to-end suite
+against real Postgres. **Not yet done: the two halves have never met on devnet.** The
+crank still settles in off-chain mirror mode, and E1's tx-size finding means the Go
+crank needs a v0 + Address Lookup Table rework before it can submit for real. That
+join — Go crank → deployed program on devnet — is the last hard step of the floor.
 
 ---
 
 ## 2. E1 — Anchor program (`programs/pitchmarket`)
 
-Verified with `cargo check` + `cargo test -p pitchmarket` (host target; includes the
-borsh golden vectors). **Not** verified with `anchor build` / on devnet — see §4.
+Builds to BPF (`cargo build-sbf`, see §4). ✅ marks below = **exercised on a local
+validator** via `tests/` (`npm test`), 8/8 passing. Not yet run on devnet.
 
 | Instruction | State | Notes |
 |---|---|---|
-| `initialize_market` | 🟡 | Market PDA + 2 outcome mints |
-| `init_vault` / `deposit` | 🟡 | Vault PDA custody |
-| `settle_match` NORMAL / MINT / MERGE | 🟡 | collateral-pool CTF model |
-| `cancel_order` / `resolve_market` (tier-a) / `redeem` | 🟡 | |
-| `sig_verify::verify_order_signature` | 🟡 | implemented; **borsh encoding now pinned by golden vectors on both sides** ✅ |
-| `combo_accept` / `resolve_combo` | 🔴 | typed stubs (E2 runs combos off-chain meanwhile) |
-| Oracle tier b / d | 🔴 | gated on TxODDS reply |
+| `initialize_market` | ✅ | Market PDA + 2 outcome mints + pool. localnet |
+| `init_vault` / `deposit` | ✅ | Vault PDA custody; USDC moved into vault ATA. localnet |
+| `settle_match` NORMAL | ✅ | peer-to-peer USDC↔shares swap. localnet |
+| `settle_match` MINT | ✅ | opposite-outcome buys mint a complete set into the pool. localnet |
+| `settle_match` MERGE | ✅ | opposite-outcome sells burn a complete set, release pooled collateral. localnet |
+| `cancel_order` | ✅ | maker cancels; a later settle of that order fails closed (`OrderClosed`). localnet |
+| `resolve_market` | ✅ | **tier-a only** (operator-signed); localnet. Tiers b/d not started |
+| `redeem` | ✅ | burns winning shares, pays 1:1 from pool. localnet |
+| `sig_verify::verify_order_signature` | ✅ | ed25519 sysvar introspection **executed for real** in settle_match. TS borsh == `sig_verify.rs::borsh_order` proven at runtime; Go borsh pinned by golden vectors (§3) |
+| `combo_accept` | 🔴 | typed stub |
+| `resolve_combo` | 🔴 | typed stub |
+| VOID path | 🔴 | |
+| Oracle tier b (challenge) / d (TxODDS sig) | 🔴 | gated on TxODDS reply |
 
-**Program ID** `3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs`. Keypair still gitignored
-on one machine — open decision §6.1.
+**Two program changes were needed to build & run** (PR #3):
+- `SettleMatch` accounts are now `Box`ed — the context otherwise overflowed the 4KB BPF
+  stack frame by 64 bytes (only surfaces at BPF build, not `cargo check`). ABI-unchanged:
+  account order, args, and semantics are identical, so the Go crank needs no change here.
+- `Cargo.toml` gained the `idl-build` feature (was missing; blocked IDL generation).
+
+**⚠️ Cross-track finding:** the settle_match tx (2 ed25519 precompiles + the
+`settle_match` ix) is **1453 bytes > the 1232 legacy limit**. It only fits as a **v0 tx
+with an Address Lookup Table** — `tests/lifecycle.ts` shows how. **The Go crank
+(`crank.TxBuilder`/`RPCSubmitter`) currently builds a legacy tx and must be reworked
+before devnet settlement** — tracked in §5/§7.
+
+**Program ID** `3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs` — pinned in `declare_id!`
+and `Anchor.toml`.
+
+⚠️ **The keypair at `target/deploy/pitchmarket-keypair.json` is gitignored and exists on
+one machine only.** Both engineers can *build* this program ID, but only whoever holds
+that file can *deploy* to it. **Decide before deploy day:** `git add -f` it (fine for a
+devnet hackathon) or share out of band. If it's lost, the program ID changes everywhere.
 
 ---
 
-## 3. E2 — Go backend (`backend/`) — 2026-07-11 rebuild
+## 3. E2 — Go backend (`backend/`) — completed 2026-07-11
 
 Verified with `go build ./... && go vet ./... && go test -p 1 -count=1 ./...` against a
 real Postgres (Neon; each test run creates and drops a scratch database).
@@ -68,55 +87,73 @@ real Postgres (Neon; each test run creates and drops a scratch database).
 | Package | State | Verified how |
 |---|---|---|
 | `matching` | ✅ | Unified ladder: NORMAL + **MINT** (two BUYs ≥100) + **MERGE** (two SELLs ≤100), price-time priority across both populations, cancel, expiry, replay-reject, revert `Unfill`, book snapshots. 15 unit tests. |
-| `models` | ✅ | borsh + sha256 hashing, ed25519 sign/verify, fee/cost formulas, base58/hex wire helpers. **Golden vectors pinned Go↔Rust** (`hash_conformance_test.go` ↔ `sig_verify.rs tests`) — the §5 drift risk is now guarded on both sides. |
-| `store` (new) | ✅ | Full Postgres layer: orders + soft-locks (BUY locks USDC, SELL locks tokens — no naked shorts), fills mirroring **lib.rs money movement exactly** (NORMAL at fill price, MINT/MERGE at own limits), RevertFill, balances, positions, combos, precision, oneliners. Integration-tested against Neon. |
-| `exchange` (new) | ✅ | The trading core: sig verify → soft-lock → match → mirror → crank → WS. Both API and bot submit through it. Revert→reconcile (§6.2 IC) proven: reverted fill restores balances, book, and re-crossability (`TestRevertReconcilesEverywhere`). |
-| `crank` | ✅ | **Builds the exact §6.5 3-instruction tx** (ed25519 taker ‖ ed25519 maker ‖ settle_match with anchor discriminator + 16 accounts in lib.rs order). Test re-implements sig_verify.rs's byte checks in Go and runs them against built instructions. RPC submitter written 🟡 (needs devnet). Off-chain mirror mode is the default until deploy. |
+| `models` | ✅ | borsh + sha256 hashing, ed25519 sign/verify, fee/cost formulas, base58/hex wire helpers. **Golden vectors pinned Go↔Rust** (`hash_conformance_test.go` ↔ `sig_verify.rs` tests) — with E1's runtime TS↔Rust proof, all three encoders are now cross-checked. |
+| `store` | ✅ | Full Postgres layer: orders + soft-locks (BUY locks USDC, SELL locks tokens — no naked shorts), fills mirroring **lib.rs money movement exactly** (NORMAL at fill price, MINT/MERGE at own limits), RevertFill, balances, positions, combos, precision, oneliners. Integration-tested against Neon. |
+| `exchange` | ✅ | The trading core: sig verify → soft-lock → match → mirror → crank → WS. Both API and bot submit through it. Revert→reconcile (§6.2 IC) proven end-to-end. |
+| `crank` | 🟡→rework | Builds the §6.5 3-instruction tx byte-verified against sig_verify.rs checks; RPC submitter written. **BUT: emits a LEGACY tx — E1's §2 finding (1453 B > 1232) means it must be reworked to a v0 tx + Address Lookup Table before devnet.** Off-chain mirror mode is the default until then. |
 | `ws` | ✅ | Hub with the six pinned events; slow-client drop; tested with live WS clients. |
-| `api` | ✅ | Full REST surface (orders, markets, book, fills, combos, precision, portfolio, balance, deposit, settlement, oneliners) + `/ws`. **End-to-end suite over real HTTP**: deposit → signed orders → MINT fill → crank capture → WS fill/book events → Postgres rows → portfolio → resolve → settlement endpoint. Bad sig → 401, replay → 409, double-accept → 409, post-kickoff precision → 410. |
-| `rfq` (new) | ✅ | Combo lifecycle with **mutex groups** (home_win+draw rejected, home_win+over2.5 allowed), sig + expiry + leg-match checks, single-use accept, resolve sweep reading the same market outcomes binary settlement writes (ADR 0004 seam). On-chain `combo_accept` behind an interface (Noop until E1 lands it). |
-| `precision` | ✅ | In store + lifecycle: kickoff-lock (entry after kickoff → rejected), one-entry-per-wallet, σ-normalized score k=2, pool payout ±3 micro dust, rake, VOID refunds. ADR 0006 end-to-end. |
-| `mmbot` (new) | ✅ | Two-sided **MINT liquidity** (both quotes are BUYs — bot needs only USDC), re-quote on fair-price ticks, RFQ quoting per the §5 formula (verified ≈ expected payout), exposure cap, crowd-seeding N distinct persona wallets. |
-| `lifecycle` (new) | ✅ | Fixture registration → 7 template markets auto-created → replay feed drives match_state/odds/kickoff-lock → full-time resolves **all** templates correctly from the score (2-1 ⇒ home_win yes, draw no, away_win no, over2.5 yes, btts yes), settles precision, sweeps combos. Balances verified to the micro. Abandoned match → everything VOID + refunds. |
-| `feed` | ✅ | `replay` drives the whole lifecycle test; `txodds` SSE client skeleton tested against a fake SSE server (auth header, garbage-frame tolerance) — real endpoint shapes still pending TxODDS reply. |
-| `oneliner` | ✅ | Claude Messages API client (no SDK dep) behind a Generator seam; 2-min ticker; only live matches generate; tested with a fake generator. Real API 🟡 (needs ANTHROPIC_API_KEY at runtime). |
-| `index` (new) | ✅ | OrderStatus mirror processor (chain wins) tested with fake source; RPC poller written 🟡 (needs deployed program). |
-| `cmd/server` | ✅ | Full wiring: env config (+ .env), graceful shutdown, `DEMO_FIXTURE` auto-registers + streams the recorded match, bot funding + pool seeding at boot. See `.env.example`. |
+| `api` | ✅ | Full REST surface + `/ws`. **End-to-end suite over real HTTP**: deposit → signed orders → MINT fill → crank capture → WS events → Postgres rows → portfolio → resolve → settlement endpoint. Bad sig → 401, replay → 409, double-accept → 409, post-kickoff precision → 410. |
+| `rfq` | ✅ | Combo lifecycle with **mutex groups**, sig + expiry + leg-match checks, single-use accept, resolve sweep reading the same market outcomes binary settlement writes (ADR 0004 seam). On-chain `combo_accept` behind an interface (Noop until E1 lands it). |
+| `precision` | ✅ | Kickoff-lock, one-entry-per-wallet, σ-normalized score k=2, pool payout ±3 micro dust, rake, VOID refunds. ADR 0006 end-to-end. |
+| `mmbot` | ✅ | Two-sided **MINT liquidity** (both quotes are BUYs — bot needs only USDC), re-quote on fair ticks, RFQ quoting per the §5 formula, exposure cap, crowd-seeding distinct persona wallets. |
+| `lifecycle` | ✅ | Fixture → 7 template markets → replay feed → full-time resolves all templates correctly, settles precision, sweeps combos; balances verified to the micro. Abandoned match → VOID + refunds. |
+| `feed` | ✅ | `replay` drives the lifecycle test; `txodds` SSE skeleton tested against a fake server — real endpoint shapes pending TxODDS reply. |
+| `oneliner` | ✅ | Claude Messages API client behind a Generator seam; 2-min ticker; tested with fake. Real API 🟡 (needs key at runtime). |
+| `index` | ✅ | OrderStatus mirror processor (chain wins) tested with fake source; RPC poller written 🟡 (needs deployed program). |
+| `cmd/server` | ✅ | Full wiring, env config (+ .env), graceful shutdown, `DEMO_FIXTURE` demo mode. See `.env.example`. |
 
 **Test-suite caveats:** DB-backed tests are slow (~300ms RTT to Neon per statement) and
-**network-flaky**: parallel packages contend on the shared endpoint (seen: 8/20 persona
-seeding), and even serialized runs occasionally hit Neon DNS/TLS timeouts mid-suite —
-a failed package that shows `dial error`/`no such host` is the network, not the code;
-re-run it. Use `go test -p 1 ./...`. Two knowns worth recording: pgx simple-protocol
-needs explicit `::bigint` casts in SQL arithmetic and JSONB params passed as strings;
-`uint64` salts round-trip through BIGINT as negative — scan via `int64`.
+**network-flaky**: parallel packages contend on the shared endpoint, and even serialized
+runs occasionally hit Neon DNS/TLS timeouts mid-suite — a failed package showing
+`dial error`/`no such host` is the network, not the code; re-run it. Use
+`go test -p 1 ./...`. Knowns: pgx simple-protocol needs explicit `::bigint` casts and
+JSONB params as strings; `uint64` salts scan via `int64`.
 
 ---
 
-## 4. 🔴 BLOCKER — `anchor build` does not compile (unchanged from 2026-07-10)
+## 4. ✅ RESOLVED — program now builds to BPF (fixed 2026-07-12, PR #3)
 
-Root cause: `cargo-build-sbf` uses platform-tools v1.43 (rustc/cargo 1.79); Anchor
-0.31.1's transitive deps now need `edition2024` (cargo ≥1.85). The local
-`agave-install init 2.3.13` claimed success but `active_release` still points at 2.1.0.
-Full diagnosis + ordered next steps in yesterday's entry (see git history of this file
-§4). **Nothing on deploy → settle → resolve → redeem can start until this is green.**
+The `edition2024` failure was caused entirely by an **old platform-tools** (v1.43 →
+rustc/cargo 1.79), which can't parse deps that Anchor 0.31.1 pulls. The fix is a
+**modern Agave install** (platform-tools **v1.54** / rustc 1.89).
 
-New since yesterday: the E2 side of that path is finished and tested — crank tx layout,
-RPC submitter, chain index are all written and waiting. Remaining once `anchor build`
-works: deploy, flip `SOLANA_RPC_URL`/`OPERATOR_KEYPAIR` in env, run one real settle.
+**How it was fixed (reproducible on a fresh machine):**
+1. Install Rust (`rustup`), Agave CLI 4.1.1 (`release.anza.xyz/stable/install` →
+   platform-tools **v1.54**), and Anchor via avm.
+2. **Build with `cargo build-sbf` from the program dir, NOT `anchor build`.** The crux:
+   `anchor build` (and `anchor idl build`) runs a toolchain override that **re-installs
+   Solana 2.1.0 and repoints `active_release` back to the old v1.43 tools** — re-breaking
+   the build (this is the "inconsistent state" the 07-10 note hit). After any `anchor`
+   invocation, repoint:
+   ```sh
+   cd ~/.local/share/solana/install
+   ln -sfn "$PWD/releases/stable-<hash>/solana-release" active_release && hash -r
+   cargo-build-sbf --version   # must read platform-tools v1.54 / rustc 1.89
+   ```
+3. `cd programs/pitchmarket && cargo build-sbf` → `target/deploy/pitchmarket.so` (419 KB).
+
+**IDL:** `anchor idl build` chokes on the two `ostatus` PDAs whose seed is a function
+call on an instruction arg (`sig_verify::order_hash(&taker)`). Workaround: temporarily
+swap those seeds for a plain arg field to emit the IDL, then restore. The runtime `.so`
+keeps the real hash-based seeds.
+
+**Verify on a second machine** — fixed on one clean box; E2 should reproduce.
 
 ---
 
-## 5. Definition of done for the Go/No-Go (today EOD)
+## 5. Definition of done for the floor (one match, one binary market, fully trustless)
 
-- [ ] `anchor build` produces a `.so` ← **the only line stopping everything below**
-- [ ] program deploys to devnet at the pinned ID
-- [x] `crank.Submitter` implemented (RPC submitter written; fake-verified)
-- [x] crank builds the exact §6.5 3-instruction tx (byte-verified in tests)
-- [x] `models.OrderHash` borsh == `sig_verify.rs` borsh (golden vectors both sides)
-- [x] signed order → matched → fill produced and mirrored (HTTP e2e, off-chain mode)
-- [ ] …and that `settle_match` lands on **devnet**
-- [ ] `resolve_market` (tier-a) → `redeem` → user's USDC moves **on-chain**
+- [x] program compiles to BPF — `cargo build-sbf` (§4); 419 KB `.so`
+- [x] full lifecycle green **on localnet**: signed order → settle_match (all 3 paths) →
+      cancel fail-closed → resolve_market → redeem, balances asserted (`npm test` 8/8)
+- [x] borsh conformance: TS↔Rust proven at runtime; Go↔Rust pinned by golden vectors
+- [x] crank builds the §6.5 3-instruction tx — TS reference proven on localnet; Go
+      builder byte-verified in unit tests
+- [ ] **Go crank reworked to v0 tx + Address Lookup Table** (1453 B > 1232 legacy limit —
+      §2 finding; `tests/lifecycle.ts` is the reference)
+- [ ] program deploys to **devnet** at the pinned ID (blocked on keypair, decision #1)
+- [ ] one signed order → matched → **Go crank** settles on devnet
+- [ ] `resolve_market` → `redeem` on devnet → user's USDC moves
 
 ---
 
@@ -124,35 +161,37 @@ works: deploy, flip `SOLANA_RPC_URL`/`OPERATOR_KEYPAIR` in env, run one real set
 
 | # | Decision | Owner | Status |
 |---|---|---|---|
-| 1 | Commit `pitchmarket-keypair.json` or share out of band? | both | **open — blocks deploy** |
+| 1 | Commit `pitchmarket-keypair.json` or share out of band? | both | **open — now the deploy blocker** |
 | 2 | Oracle tier for demo: a (operator) vs d (TxODDS signed) | E1 | open, gated on TxODDS reply |
 | 3 | TxODDS signed-data email sent? | — | **still unknown — confirm** |
-| 4 | ~~Postgres vs in-memory~~ | E2 | **CLOSED 2026-07-11: Postgres (Neon), wired + tested** |
+| 4 | ~~Postgres vs in-memory~~ | E2 | CLOSED 2026-07-11: Postgres (Neon), wired + tested |
 | 5 | Combos on-chain (`combo_accept`) vs off-chain for demo | E1 | E2 ships either way (interface seam); default off-chain per cut plan |
 
 ---
 
 ## 7. Next actions
 
-**E1 (only thing that matters):** unblock `anchor build` (§4) → deploy → run one real
-`settle_match` through the already-built crank. Then `combo_accept`/`resolve_combo`.
+**E2:** (1) rework `crank.TxBuilder`/`RPCSubmitter` to v0 tx + ALT (port from
+`tests/lifecycle.ts`); (2) reproduce the §4 build on this machine; (3) **frontend** —
+now the biggest unstarted scope.
 
-**E2:** frontend (Next.js + Privy) is now the entire remaining scope — the backend
-surface it consumes is live and documented in `backend/internal/api/api.go`.
-Run locally: `DEMO_FIXTURE=demo-final go run ./cmd/server` (see `.env.example`).
+**E1:** devnet deploy (resolve decision #1 first) → run the TS suite against devnet →
+`combo_accept` / `resolve_combo` → oracle tier d if TxODDS replies.
 
-**Both:** decision #1 (keypair) today; confirm #3 (TxODDS email).
+**Both:** keypair decision today; confirm the TxODDS email; then the joint milestone —
+**Go crank settles a real match on devnet.**
 
 ---
 
 ## 8. Housekeeping / paper cuts
 
 - Neon DATABASE_URL lives in the gitignored `.env` (`.env.example` documents the shape).
-  The URL was shared in chat — **treat it as compromised-ish; rotate after the hackathon.**
-- `docs/interface-contract.md` §6.5-above-§6 ordering still unfixed.
+  Rotate the credential after the hackathon (it was shared in chat).
+- **Toolchain trap:** any `anchor` CLI invocation may silently repoint `active_release`
+  to old platform-tools — see §4 step 2 before debugging "mystery" build failures.
+- `docs/interface-contract.md` §6.5-above-§6 ordering still unfixed; §6.5 should also
+  gain the v0+ALT requirement once the Go crank lands it.
 - DB tests: `go test -p 1` (see §3 caveats).
-- `orders.locked` column added to schema (per-order residual soft-lock accounting);
-  `balances` and `combo_rfqs` tables added; schema is now idempotent (IF NOT EXISTS).
 
 ---
 
@@ -162,7 +201,10 @@ Newest first. One row per meaningful change. **Append here in the same commit as
 
 | Date | Who | What changed | Verified how |
 |---|---|---|---|
-| 2026-07-11 | Ashish | **E2 backend complete**: matching MINT/MERGE + cancel/expiry/unfill; Postgres store (orders/soft-locks/fills/balances/positions/combos/precision/oneliners) on Neon; exchange core with revert→reconcile; crank §6.5 tx builder + RPC submitter + off-chain mode; WS hub; full REST API; RFQ with mutex groups; precision (kickoff-lock, σ-score, rake, VOID); MM bot (MINT liquidity, RFQ formula, crowd-seed); lifecycle (auto markets, feed→resolution); txodds SSE skeleton; Claude one-liners; chain-index poller; cmd/server wiring; borsh golden vectors Go↔Rust; demo replay fixture | `go build` ✅ `go vet` ✅ · every test package green against real Postgres (11 pkgs incl. HTTP e2e + WS + revert path); two packages hit Neon network timeouts in the one full serialized run and passed on immediate re-run (§3 caveat) · `cargo test -p pitchmarket` ✅ 4/4 · `anchor build` still ❌ (§4) |
+| 2026-07-12 | Ashish | Merged PR #3 into main; reconciled this file across both tracks (E1 localnet results + E2 backend state + v0/ALT crank rework now tracked in §5/§7) | host `cargo test -p pitchmarket` ✅ · `go build`/`vet` + targeted Go suites ✅ on the merged tree |
+| 2026-07-13 | E1 | Added MERGE + cancel_order tests; refactored the TS harness into `tests/helpers.ts` (single borsh impl) | `npm test` **8/8 ✅** on `solana-test-validator` — all settle paths + cancel fail-closed |
+| 2026-07-12 | E1 | Fixed §4 build blocker (platform-tools v1.54); Boxed `SettleMatch` accounts (BPF stack overflow); added `idl-build` feature; added TS lifecycle test harness (`tests/`, `package.json`) | `cargo build-sbf` ✅ · `npm test` 5/5 ✅ on `solana-test-validator` (initialize→deposit→settle MINT+NORMAL→resolve→redeem, balances asserted) |
+| 2026-07-11 | Ashish | **E2 backend complete**: matching MINT/MERGE + cancel/expiry/unfill; Postgres store on Neon; exchange core with revert→reconcile; crank §6.5 tx builder + RPC submitter + off-chain mode; WS hub; full REST API; RFQ with mutex groups; precision; MM bot; lifecycle; txodds SSE skeleton; Claude one-liners; chain-index poller; server wiring; borsh golden vectors Go↔Rust; demo replay fixture | `go build` ✅ `go vet` ✅ · every test package green against real Postgres (11 pkgs incl. HTTP e2e + WS + revert path); two packages hit Neon network timeouts in the one full serialized run and passed on immediate re-run (§3 caveat) · `cargo test -p pitchmarket` ✅ 4/4 · `anchor build` ❌ at the time (fixed next day, §4) |
 | 2026-07-10 | Ashish | Added `progress.md` + `CLAUDE.md`; trimmed stale README status; untracked `.DS_Store`; committed the E1/E2 scaffold | `cargo check` ✅ · `go build ./... && go vet ./...` ✅ · `anchor build` ❌ (§4) |
 | 2026-07-09 | E1 | Implemented `sig_verify::verify_order_signature`; pinned settle_match tx layout in interface-contract §6.5 | `cargo check` only — never executed |
 | 2026-07-08 | E1/E2 | Anchor program scaffold; Go matching engine, crank skeleton, order API, replay feed, Postgres schema | `cargo check` · `go build` |
