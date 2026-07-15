@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/Zerith-Studio/prediction-market/backend/internal/feed"
-	"github.com/Zerith-Studio/prediction-market/backend/internal/models"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/rfq"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/store"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/templates"
@@ -38,6 +37,12 @@ type FairPriceSink interface {
 	OnFairPrice(marketID [32]byte, priceCents uint16)
 }
 
+// ChainCreator initializes markets on-chain at fixture registration
+// (crank.ChainOps implements it; nil = off-chain mirror mode).
+type ChainCreator interface {
+	InitializeMarket(ctx context.Context, marketID [32]byte) (txSig string, err error)
+}
+
 type Service struct {
 	store    *store.Store
 	hub      *ws.Hub
@@ -48,6 +53,8 @@ type Service struct {
 
 	// PrecisionRakeBps is withheld from precision pools (ADR 0006 C1 guard #2).
 	PrecisionRakeBps uint32
+	// Creator, when set, mirrors every registered market on-chain.
+	Creator ChainCreator
 }
 
 func New(st *store.Store, hub *ws.Hub, rfqSvc *rfq.Service, resolver ChainResolver, prices FairPriceSink, log *slog.Logger) *Service {
@@ -73,6 +80,12 @@ func (s *Service) RegisterFixture(ctx context.Context, fixtureID, home, away str
 			t.RenderTitle(home, away), t.RenderRule(home, away)); err != nil {
 			return fmt.Errorf("lifecycle: create %s: %w", t.Key, err)
 		}
+		if s.Creator != nil && t.Type == "binary" {
+			if _, err := s.Creator.InitializeMarket(ctx, marketID); err != nil {
+				s.log.Error("lifecycle: on-chain initialize_market failed — market stays mirror-only",
+					"template", t.Key, "err", err)
+			}
+		}
 	}
 	s.log.Info("lifecycle: fixture registered", "fixture", fixtureID, "markets", len(templates.Registry))
 	return nil
@@ -88,6 +101,8 @@ type oddsPayload struct {
 type FinalScore struct {
 	HomeGoals   int  `json:"home_goals"`
 	AwayGoals   int  `json:"away_goals"`
+	HTHomeGoals int  `json:"ht_home_goals,omitempty"`
+	HTAwayGoals int  `json:"ht_away_goals,omitempty"`
 	TotalPasses *int `json:"total_passes,omitempty"`
 	Minute      int  `json:"minute,omitempty"`
 	Abandoned   bool `json:"abandoned,omitempty"`
@@ -179,15 +194,14 @@ func (s *Service) ResolveFixture(ctx context.Context, fixtureID string, final Fi
 		marketID := templates.MarketID(fixtureID, t.Key)
 		switch t.Type {
 		case "binary":
-			yes, ok := binaryOutcome(t.Key, final)
+			result, ok := binaryOutcome(t.Key, final)
 			if !ok {
 				continue
 			}
-			outcome := models.OutcomeNo
-			result := "no"
-			if yes {
-				outcome = models.OutcomeYes
-				result = "yes"
+			outcome := map[string]uint8{"no": 0, "yes": 1, "void": 2}[result]
+			status := "settled"
+			if result == "void" {
+				status = "void"
 			}
 			txSig, err := s.resolver.ResolveMarket(ctx, marketID, outcome)
 			if err != nil {
@@ -198,7 +212,7 @@ func (s *Service) ResolveFixture(ctx context.Context, fixtureID string, final Fi
 				"result": result,
 				"score":  fmt.Sprintf("%d-%d", final.HomeGoals, final.AwayGoals),
 			})
-			if err := s.store.SettleMarket(ctx, marketID, outcomeJSON, txSig, "settled"); err != nil {
+			if err := s.store.SettleMarket(ctx, marketID, outcomeJSON, txSig, status); err != nil {
 				return err
 			}
 
@@ -244,20 +258,36 @@ func (s *Service) voidFixture(ctx context.Context, fixtureID string) error {
 	return nil
 }
 
-func binaryOutcome(templateKey string, f FinalScore) (yes, ok bool) {
+// binaryOutcome resolves a template to "yes" | "no" | "void" from the final
+// score. dnb_home VOIDs on the draw (stake refunded — the on-chain program's
+// MarketOutcome::Void path).
+func binaryOutcome(templateKey string, f FinalScore) (string, bool) {
+	yn := func(b bool) string {
+		if b {
+			return "yes"
+		}
+		return "no"
+	}
 	switch templateKey {
 	case "home_win":
-		return f.HomeGoals > f.AwayGoals, true
+		return yn(f.HomeGoals > f.AwayGoals), true
 	case "draw":
-		return f.HomeGoals == f.AwayGoals, true
+		return yn(f.HomeGoals == f.AwayGoals), true
 	case "away_win":
-		return f.AwayGoals > f.HomeGoals, true
+		return yn(f.AwayGoals > f.HomeGoals), true
 	case "over_2_5":
-		return f.HomeGoals+f.AwayGoals >= 3, true
+		return yn(f.HomeGoals+f.AwayGoals >= 3), true
 	case "btts":
-		return f.HomeGoals > 0 && f.AwayGoals > 0, true
+		return yn(f.HomeGoals > 0 && f.AwayGoals > 0), true
+	case "dnb_home":
+		if f.HomeGoals == f.AwayGoals {
+			return "void", true
+		}
+		return yn(f.HomeGoals > f.AwayGoals), true
+	case "ou_1h_075":
+		return yn(f.HTHomeGoals+f.HTAwayGoals >= 1), true
 	}
-	return false, false
+	return "", false
 }
 
 func precisionActual(templateKey string, f FinalScore) (float64, bool) {
