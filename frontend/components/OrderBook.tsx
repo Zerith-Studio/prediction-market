@@ -7,7 +7,7 @@ interface Row {
   price: number;
   size: number;
   total: number;
-  depth: number; // 0..1
+  depth: number;
 }
 
 function withTotals(levels: BookLevel[], max: number): Row[] {
@@ -25,7 +25,7 @@ export function OrderBook({
 }: {
   book: Book;
   flashId: number;
-  flashSide: "yes" | "no";
+  flashSide: "up" | "down";
 }) {
   const bids = book.bids.slice(0, 4);
   const asks = book.asks.slice(0, 4);
@@ -34,7 +34,6 @@ export function OrderBook({
     asks.reduce((a, b) => a + b.size, 0)
   );
   const bidRows = withTotals(bids, maxTotal);
-  // asks rendered best-price-nearest-the-spread => reverse for display (high on top)
   const askRows = withTotals(asks, maxTotal).reverse();
 
   const bestBid = bids[0]?.price ?? 0;
@@ -42,53 +41,47 @@ export function OrderBook({
   const spread = bestAsk && bestBid ? bestAsk - bestBid : 0;
   const mid = bestAsk && bestBid ? Math.round((bestAsk + bestBid) / 2) : 0;
 
-  if (bids.length === 0 && asks.length === 0) {
+  if (!bids.length && !asks.length) {
     return (
-      <div className="panel p-6">
-        <BookHeader />
-        <p className="py-10 text-center text-[13px] leading-relaxed text-muted">
+      <div>
+        <Head />
+        <p className="py-8 text-[13px] leading-relaxed text-muted">
           No resting orders yet.
           <br />
-          <span className="text-dim">
-            A signed limit order rests here until someone crosses it.
-          </span>
+          <span className="text-dim">A signed limit order rests here until crossed.</span>
         </p>
       </div>
     );
   }
 
   return (
-    <div className="panel p-[18px] sm:p-5">
-      <BookHeader />
+    <div>
+      <Head />
       <div className="font-mono text-[12.5px]">
-        <div className="grid grid-cols-3 px-1 pb-2 text-[10.5px] uppercase tracking-[0.08em] text-dim">
+        <div className="grid grid-cols-3 pb-2.5 eyebrow">
           <span>Price</span>
           <span className="text-right">Size</span>
           <span className="text-right">Total</span>
         </div>
-
-        {askRows.map((r, i) => {
-          const isBest = i === askRows.length - 1;
-          return (
-            <BookRow
-              key={`ask-${r.price}`}
-              row={r}
-              side="ask"
-              flash={isBest && flashSide === "no" ? flashId : 0}
-            />
-          );
-        })}
-
-        <div className="my-1.5 flex items-center justify-center gap-2 border-y border-dashed border-line py-2 text-[11px] tracking-[0.08em] text-dim tnum">
-          SPREAD {spread}¢ · MID {mid}¢
+        {askRows.map((r, i) => (
+          <BookRow
+            key={`ask-${r.price}`}
+            row={r}
+            side="ask"
+            flash={i === askRows.length - 1 && flashSide === "down" ? flashId : 0}
+          />
+        ))}
+        <div className="my-1 flex items-center gap-3 py-1.5 text-[11px] text-dim tnum">
+          <span className="tracking-[0.06em]">MID {mid}¢</span>
+          <span className="h-px flex-1 bg-line" />
+          <span className="tracking-[0.06em]">SPREAD {spread}¢</span>
         </div>
-
         {bidRows.map((r, i) => (
           <BookRow
             key={`bid-${r.price}`}
             row={r}
             side="bid"
-            flash={i === 0 && flashSide === "yes" ? flashId : 0}
+            flash={i === 0 && flashSide === "up" ? flashId : 0}
           />
         ))}
       </div>
@@ -96,45 +89,34 @@ export function OrderBook({
   );
 }
 
-function BookHeader() {
+function Head() {
   return (
-    <div className="mb-3.5 flex items-center justify-between">
-      <h3 className="text-[13px] font-bold">Order book</h3>
-      <span className="font-mono text-[11px] text-dim">YES side</span>
+    <div className="mb-4 flex items-baseline justify-between">
+      <h2 className="text-[13px] font-semibold text-ink">Order book</h2>
+      <span className="font-mono text-[11px] text-dim">YES</span>
     </div>
   );
 }
 
-function BookRow({
-  row,
-  side,
-  flash,
-}: {
-  row: Row;
-  side: "bid" | "ask";
-  flash: number;
-}) {
+function BookRow({ row, side, flash }: { row: Row; side: "bid" | "ask"; flash: number }) {
   const isBid = side === "bid";
   return (
     <div
-      // remount on flash id change to replay the fill-flash keyframe
       key={flash || undefined}
-      className={`relative z-[1] grid grid-cols-3 rounded px-1 py-[5px] ${
-        flash ? (isBid ? "animate-flash-yes" : "animate-flash-no") : ""
+      className={`relative grid grid-cols-3 py-[5px] ${
+        flash ? (isBid ? "animate-flash-up" : "animate-flash-down") : ""
       }`}
     >
       <span
-        className={`absolute inset-y-0 -z-[1] rounded ${
-          isBid ? "left-0 bg-yes/[0.16]" : "right-0 bg-no/[0.16]"
-        }`}
-        style={{ width: `${Math.max(4, row.depth * 100)}%` }}
+        className={`absolute inset-y-0 -z-0 ${isBid ? "left-0 bg-accent/[0.07]" : "right-0 bg-down/[0.07]"}`}
+        style={{ width: `${Math.max(3, row.depth * 100)}%` }}
         aria-hidden
       />
-      <span className={`font-bold ${isBid ? "text-yes" : "text-no"} tnum`}>
+      <span className={`relative z-10 ${isBid ? "text-accent" : "text-down"} tnum`}>
         {row.price}¢
       </span>
-      <span className="text-right text-muted tnum">{shares(row.size)}</span>
-      <span className="text-right text-muted tnum">{shares(row.total)}</span>
+      <span className="relative z-10 text-right text-muted tnum">{shares(row.size)}</span>
+      <span className="relative z-10 text-right text-dim tnum">{shares(row.total)}</span>
     </div>
   );
 }

@@ -9,41 +9,48 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        bg: "#07090d",
-        panel: "#11161f",
-        panel2: "#141b26",
-        line: "#1e2735",
-        line2: "#2a3547",
-        ink: "#eef2f8",
-        muted: "#8b98ad",
-        dim: "#5c6a7e",
-        yes: { DEFAULT: "#22e08a", ink: "#052015", dim: "#0e5c3a" },
-        no: { DEFAULT: "#ff4d6a", ink: "#2a0710", dim: "#5c1224" },
-        accent: "#ffd21e",
-        verify: "#00e0ff",
+        bg: "#0a0a0b", // single flat surface — no panels
+        ink: "#f4f5f7", // near-white
+        muted: "#9297a0", // secondary
+        dim: "#565b63", // tertiary / labels
+        line: "#1b1c20", // hairline
+        line2: "#292b30", // hairline, stronger
+        accent: "#34d399", // the one accent: up / yes / positive / on-chain
+        down: "#f2637e", // down / no — used sparingly
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
+      borderRadius: {
+        // sharp by default
+        DEFAULT: "0px",
+        sm: "1px",
+        md: "2px",
+      },
       keyframes: {
         pulse: {
-          "70%": { boxShadow: "0 0 0 9px rgba(255,46,77,0)" },
-          "100%": { boxShadow: "0 0 0 0 rgba(255,46,77,0)" },
+          "70%": { boxShadow: "0 0 0 7px rgba(52,211,153,0)" },
+          "100%": { boxShadow: "0 0 0 0 rgba(52,211,153,0)" },
         },
-        flashYes: {
-          "0%": { backgroundColor: "rgba(34,224,138,.35)" },
-          "100%": { backgroundColor: "transparent" },
+        pulseDown: {
+          "70%": { boxShadow: "0 0 0 7px rgba(242,99,126,0)" },
+          "100%": { boxShadow: "0 0 0 0 rgba(242,99,126,0)" },
         },
-        flashNo: {
-          "0%": { backgroundColor: "rgba(255,77,106,.35)" },
-          "100%": { backgroundColor: "transparent" },
+        flashUp: {
+          "0%": { color: "#34d399" },
+          "100%": { color: "inherit" },
+        },
+        flashDown: {
+          "0%": { color: "#f2637e" },
+          "100%": { color: "inherit" },
         },
       },
       animation: {
-        "live-pulse": "pulse 1.6s infinite",
-        "flash-yes": "flashYes .9s ease-out",
-        "flash-no": "flashNo .9s ease-out",
+        "live-pulse": "pulse 1.8s infinite",
+        "live-pulse-down": "pulseDown 1.8s infinite",
+        "flash-up": "flashUp 1s ease-out",
+        "flash-down": "flashDown 1s ease-out",
       },
     },
   },

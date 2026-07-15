@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { useLiveMarket } from "@/lib/useLiveMarket";
 import { TopBar } from "@/components/TopBar";
 import { MatchHero } from "@/components/MatchHero";
-import { OddsMeter } from "@/components/OddsMeter";
+import { PriceChart } from "@/components/PriceChart";
 import { OrderBook } from "@/components/OrderBook";
 import { RecentFills } from "@/components/RecentFills";
 import { TradePanel } from "@/components/TradePanel";
@@ -13,67 +14,82 @@ import { MarketSkeleton } from "@/components/Skeletons";
 
 export default function MarketPage({ params }: { params: { id: string } }) {
   const m = useLiveMarket(params.id);
+  const up = m.priceDelta >= 0;
 
   return (
     <div className="min-h-screen">
       <TopBar balanceMicro={m.balanceMicro} />
-      <main className="mx-auto max-w-[1180px] px-5 py-5 sm:py-6">
+      <main className="mx-auto max-w-[1200px] px-5 sm:px-8">
         {m.loading && <MarketSkeleton />}
-
-        {!m.loading && m.errorStatus && (
-          <NotFound status={m.errorStatus} />
-        )}
+        {!m.loading && m.errorStatus && <NotFound status={m.errorStatus} />}
 
         {!m.loading && !m.errorStatus && m.market && m.match && m.book && (
-          <div className="space-y-4">
+          <>
             <MatchHero match={m.match} />
 
-            <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
-              {/* left: market read + book */}
-              <div className="space-y-4">
-                <div className="panel p-5">
-                  <div className="mb-4 flex items-start justify-between gap-4">
-                    <div>
-                      <h1 className="text-[17px] font-extrabold tracking-tight">
-                        {m.market.title}
-                      </h1>
-                      <p className="mt-1 max-w-[60ch] text-[12.5px] leading-relaxed text-muted">
-                        {m.market.rule}
-                      </p>
-                    </div>
-                    <span className="shrink-0 rounded-md border border-line2 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-dim">
-                      binary · on-chain
+            {/* price + chart */}
+            <section className="rule-t pt-8">
+              <div className="mb-8 flex items-end justify-between gap-6">
+                <div>
+                  <div className="mb-3 flex items-baseline gap-2">
+                    <h1 className="text-[15px] font-semibold text-ink">
+                      {m.market.title}
+                    </h1>
+                    <span className="eyebrow">binary · on-chain</span>
+                  </div>
+                  <div className="flex items-baseline gap-3">
+                    <span className="font-mono text-[46px] font-light leading-none text-ink tnum sm:text-[64px]">
+                      {m.yesPrice}
+                      <span className="ml-0.5 text-[22px] text-dim sm:text-[28px]">¢</span>
+                    </span>
+                    <span
+                      className={`flex items-center gap-0.5 font-mono text-[13px] tnum ${
+                        up ? "text-accent" : "text-down"
+                      }`}
+                    >
+                      {up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
+                      {Math.abs(m.priceDelta)}¢
                     </span>
                   </div>
-                  <OddsMeter
-                    yesPrice={m.yesPrice}
-                    priceDelta={m.priceDelta}
-                    volumeMicro={18_400_000_000}
-                  />
+                  <p className="mt-2.5 font-mono text-[12px] text-muted">
+                    YES · implied {m.yesPrice}% ·{" "}
+                    <span className="text-dim">NO {100 - m.yesPrice}¢</span>
+                  </p>
                 </div>
-
-                <PitchTicker lines={m.oneliners} index={m.onelinerIdx} />
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <OrderBook
-                    book={m.book}
-                    flashId={m.lastFillId}
-                    flashSide={m.lastFillSide}
-                  />
-                  <RecentFills fills={m.fills} yesPrice={m.yesPrice} />
+                <div className="hidden text-right font-mono text-[12px] text-dim sm:block">
+                  <div className="text-muted tnum">$18.4k</div>
+                  <div>24h volume</div>
                 </div>
               </div>
 
-              {/* right: sticky trade panel */}
-              <div className="lg:sticky lg:top-[76px] lg:self-start">
-                <TradePanel
-                  yesPrice={m.yesPrice}
-                  balanceMicro={m.balanceMicro}
-                  marketStatus={m.market.status}
-                />
+              <PriceChart data={m.history} up={up} />
+            </section>
+
+            <div className="rule-t rule-b">
+              <PitchTicker lines={m.oneliners} index={m.onelinerIdx} />
+            </div>
+
+            {/* book + trades + trade panel */}
+            <div className="grid gap-10 py-10 lg:grid-cols-[1fr_300px]">
+              <div className="grid gap-10 sm:grid-cols-2 lg:gap-12">
+                <OrderBook book={m.book} flashId={m.lastFillId} flashSide={m.lastFillSide} />
+                <RecentFills fills={m.fills} yesPrice={m.yesPrice} />
+              </div>
+              <div className="lg:rule-l lg:pl-10">
+                <div className="lg:sticky lg:top-[76px]">
+                  <TradePanel
+                    yesPrice={m.yesPrice}
+                    balanceMicro={m.balanceMicro}
+                    marketStatus={m.market.status}
+                  />
+                </div>
               </div>
             </div>
-          </div>
+
+            <footer className="rule-t py-6 font-mono text-[11px] text-dim">
+              {m.market.rule}
+            </footer>
+          </>
         )}
       </main>
     </div>
@@ -83,21 +99,21 @@ export default function MarketPage({ params }: { params: { id: string } }) {
 function NotFound({ status }: { status: number }) {
   const is404 = status === 404;
   return (
-    <div className="mx-auto max-w-md py-24 text-center">
-      <div className="mb-4 font-mono text-[13px] text-dim">ERROR {status}</div>
-      <h1 className="mb-2 text-2xl font-extrabold tracking-tight">
+    <div className="mx-auto max-w-md py-32 text-center">
+      <div className="mb-4 eyebrow">Error {status}</div>
+      <h1 className="mb-3 text-2xl font-semibold tracking-tight">
         {is404 ? "Market not found" : "Couldn’t load this market"}
       </h1>
-      <p className="mb-6 text-[14px] leading-relaxed text-muted">
+      <p className="mb-8 text-[14px] leading-relaxed text-muted">
         {is404
           ? "This market doesn’t exist or was never created on-chain."
-          : "The exchange didn’t respond. It may be a transient network issue."}
+          : "The exchange didn’t respond — likely a transient network issue."}
       </p>
       <Link
         href="/"
-        className="inline-flex rounded-lg border border-line2 bg-panel2 px-4 py-2.5 text-[13px] font-bold text-ink transition-colors hover:border-dim"
+        className="font-mono text-[13px] text-accent transition-colors hover:brightness-110"
       >
-        Back to markets
+        ← Back to markets
       </Link>
     </div>
   );

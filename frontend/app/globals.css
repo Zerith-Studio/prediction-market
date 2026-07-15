@@ -11,43 +11,37 @@
   }
   body {
     @apply bg-bg text-ink font-sans antialiased;
-    background-image: radial-gradient(
-      1200px 600px at 72% -12%,
-      rgba(18, 32, 58, 0.6) 0%,
-      transparent 55%
-    );
-    background-attachment: fixed;
+    /* flat surface — no gradients, no texture */
   }
-  /* tabular numerals everywhere numbers live */
   .tnum {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1;
   }
   ::selection {
-    background: rgba(0, 224, 255, 0.25);
+    background: rgba(52, 211, 153, 0.22);
   }
   :focus-visible {
-    outline: 2px solid theme("colors.verify");
-    outline-offset: 2px;
-    border-radius: 6px;
+    outline: 1px solid theme("colors.accent");
+    outline-offset: 3px;
   }
 }
 
-@layer components {
-  /* broadcast pitch-stripe texture for the match hero */
-  .pitch-stripes {
-    background-image: repeating-linear-gradient(
-      115deg,
-      #0d1420 0 34px,
-      #0f1826 34px 68px
-    );
+@layer utilities {
+  /* hairline separators do all the structural work; boxes do none */
+  .rule-t {
+    @apply border-t border-line;
   }
-  .panel {
-    @apply rounded-2xl border border-line bg-panel;
+  .rule-b {
+    @apply border-b border-line;
+  }
+  .rule-l {
+    @apply border-l border-line;
+  }
+  .eyebrow {
+    @apply font-mono text-[10.5px] uppercase tracking-[0.18em] text-dim;
   }
 }
 
-/* Motion budget: every broadcast moment degrades to instant/crossfade. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
