@@ -155,7 +155,7 @@ func run(log *slog.Logger) error {
 
 	srv := &http.Server{
 		Addr:    envOr("PITCHMARKET_ADDR", ":8080"),
-		Handler: api.New(ex, st, hub, rfqSvc, lc, log).Routes(),
+		Handler: api.WithCORS(api.New(ex, st, hub, rfqSvc, lc, log).Routes(), os.Getenv("CORS_ORIGIN")),
 	}
 	go func() {
 		<-ctx.Done()
