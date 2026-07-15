@@ -190,6 +190,84 @@ func TestBuildSettleMatchTxSignsAndCompiles(t *testing.T) {
 	}
 }
 
+// The tx-size finding from progress.md §2: legacy doesn't fit, v0 + market
+// lookup table does — with room to spare.
+func TestSettleTxSizeRequiresV0(t *testing.T) {
+	f := testFill(t)
+	operator := solana.NewWallet()
+	b := testBuilder()
+
+	legacy, err := b.BuildSettleMatchTx(f, operator.PublicKey(), solana.Hash{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Sign(signerFor(operator)); err != nil {
+		t.Fatal(err)
+	}
+	legacyBytes, err := legacy.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legacyBytes) <= 1232 {
+		t.Fatalf("expected legacy settle tx to exceed 1232 bytes (got %d) — if this now fits, the v0/ALT machinery may be removable", len(legacyBytes))
+	}
+
+	entries, err := b.LookupAddresses(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 12 lookup-eligible accounts for this NORMAL fill (taker and maker share
+	// the YES mint): market, mint, pool, 2 vaults, 4 ATAs, sysvar, token
+	// program, system program. Operator + 2 ostatus PDAs stay static.
+	if len(entries) != 12 {
+		t.Errorf("lookup addresses = %d, want 12: %v", len(entries), entries)
+	}
+	for _, e := range entries {
+		if e.Equals(operator.PublicKey()) {
+			t.Error("operator (fee payer) must never be in the lookup table")
+		}
+	}
+
+	tableAddr := solana.NewWallet().PublicKey()
+	v0, err := b.BuildSettleMatchTxV0(f, operator.PublicKey(), solana.Hash{1}, tableAddr, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v0.Sign(signerFor(operator)); err != nil {
+		t.Fatal(err)
+	}
+	v0Bytes, err := v0.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v0Bytes) > 1232 {
+		t.Fatalf("v0 settle tx is %d bytes — still over the 1232 limit", len(v0Bytes))
+	}
+	t.Logf("legacy=%dB v0=%dB (limit 1232)", len(legacyBytes), len(v0Bytes))
+
+	// The compiled v0 message must still carry the exact 3-instruction order
+	// and exactly one signature (the operator).
+	if len(v0.Message.Instructions) != 3 {
+		t.Fatalf("v0 ix count = %d", len(v0.Message.Instructions))
+	}
+	if len(v0.Signatures) != 1 {
+		t.Errorf("want 1 signature (operator only), got %d", len(v0.Signatures))
+	}
+	lookups := v0.Message.GetAddressTableLookups()
+	if len(lookups) != 1 || !lookups[0].AccountKey.Equals(tableAddr) {
+		t.Errorf("want exactly one lookup on the market table, got %+v", lookups)
+	}
+}
+
+func signerFor(w *solana.Wallet) func(solana.PublicKey) *solana.PrivateKey {
+	return func(key solana.PublicKey) *solana.PrivateKey {
+		if key.Equals(w.PublicKey()) {
+			return &w.PrivateKey
+		}
+		return nil
+	}
+}
+
 type fakeSubmitter struct {
 	fail bool
 	got  []matching.Fill

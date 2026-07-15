@@ -13,29 +13,39 @@ import (
 
 // RPCSubmitter builds, signs (operator key), sends, and confirms settle_match
 // transactions against a Solana RPC endpoint (devnet for the hackathon).
+// Transactions are v0 with a per-market address lookup table — the 3-ix settle
+// tx exceeds the legacy size limit (progress.md §2 finding).
 type RPCSubmitter struct {
 	Client   *rpc.Client
 	Builder  *TxBuilder
 	Operator solana.PrivateKey
+	Tables   *LUTManager
 	// ConfirmTimeout bounds the poll for finalization (default 30s).
 	ConfirmTimeout time.Duration
 }
 
 func NewRPCSubmitter(rpcURL string, builder *TxBuilder, operator solana.PrivateKey) *RPCSubmitter {
+	client := rpc.New(rpcURL)
 	return &RPCSubmitter{
-		Client:         rpc.New(rpcURL),
+		Client:         client,
 		Builder:        builder,
 		Operator:       operator,
+		Tables:         NewLUTManager(client, builder, operator),
 		ConfirmTimeout: 30 * time.Second,
 	}
 }
 
 func (s *RPCSubmitter) SettleMatch(ctx context.Context, f matching.Fill) (string, error) {
+	tableAddr, entries, err := s.Tables.EnsureTable(ctx, f)
+	if err != nil {
+		return "", fmt.Errorf("crank: lookup table: %w", err)
+	}
 	recent, err := s.Client.GetLatestBlockhash(ctx, rpc.CommitmentFinalized)
 	if err != nil {
 		return "", fmt.Errorf("crank: blockhash: %w", err)
 	}
-	tx, err := s.Builder.BuildSettleMatchTx(f, s.Operator.PublicKey(), recent.Value.Blockhash)
+	tx, err := s.Builder.BuildSettleMatchTxV0(f, s.Operator.PublicKey(),
+		recent.Value.Blockhash, tableAddr, entries)
 	if err != nil {
 		return "", err
 	}
