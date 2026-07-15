@@ -138,7 +138,7 @@ func (m *LUTManager) sendAndWaitNextSlot(ctx context.Context, ixs []solana.Instr
 	}
 
 	var landedSlot uint64
-	deadline := time.Now().Add(45 * time.Second)
+	deadline := time.Now().Add(120 * time.Second)
 	for {
 		st, err := m.client.GetSignatureStatuses(ctx, false, sig)
 		if err == nil && len(st.Value) > 0 && st.Value[0] != nil {
@@ -158,7 +158,7 @@ func (m *LUTManager) sendAndWaitNextSlot(ctx context.Context, ixs []solana.Instr
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(400 * time.Millisecond):
+		case <-time.After(1500 * time.Millisecond):
 		}
 	}
 
@@ -173,7 +173,7 @@ func (m *LUTManager) sendAndWaitNextSlot(ctx context.Context, ixs []solana.Instr
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(400 * time.Millisecond):
+		case <-time.After(1500 * time.Millisecond):
 		}
 	}
 }

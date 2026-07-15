@@ -85,7 +85,7 @@ func (s *RPCSubmitter) SettleMatch(ctx context.Context, f matching.Fill) (string
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(1500 * time.Millisecond):
 		}
 	}
 	return "", fmt.Errorf("crank: tx %s not confirmed within %s", sig, timeout)

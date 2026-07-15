@@ -19,9 +19,9 @@ Legend: ✅ done & verified · 🟡 written but unverified · 🔴 not started /
 |---|---|
 | Deadline | **2026-07-15** (internal) · judged by 2026-07-29 |
 | Days left | **3** |
-| E1 program | ✅ builds to BPF; **full lifecycle green on localnet** (8/8 TS tests) — not yet devnet |
-| E2 backend | ✅ complete and tested end-to-end (off-chain mirror mode) |
-| **Top blockers** | **1) devnet deploy (keypair, decision #1) · 2) Go crank must emit v0 tx + ALT (§2 finding) · 3) frontend not started** |
+| E1 program | ✅ **DEPLOYED TO DEVNET** at the pinned ID; full lifecycle proven on devnet |
+| E2 backend | ✅ complete; **Go crank settled a real match ON DEVNET** (v0+ALT) |
+| **Top blocker** | **frontend not started** — everything else on the floor is done |
 
 **Honest summary.** Both halves of the trustless floor now work — separately. E1: the
 §4 toolchain blocker is fixed, the program compiles to BPF, and the full lifecycle
@@ -151,14 +151,20 @@ keeps the real hash-based seeds.
       builder byte-verified in unit tests
 - [x] **Go crank reworked to v0 tx + Address Lookup Table** — per-market cached LUT
       (`crank/lut.go`); size proven in tests: legacy 1421 B ❌ vs v0 1116 B ✅ (limit 1232)
-- [ ] program deploys to **devnet** at the pinned ID — keypair committed (decision #1
-      CLOSED), `.so` built on a second machine (419,400 B, §4 reproduced); **blocked
-      only on devnet SOL** (faucet rate-limited; operator
-      `2rRndZBMURYnyZNY4b7Kvsmugn77dXchTmrzMub6A2fQ` needs ~3.5 SOL)
-- [ ] one signed order → matched → **Go crank** settles on devnet — harness ready:
-      `go run ./cmd/devnet-e2e` runs mock-USDC → market → vaults → engine fill →
-      v0 settle → assertions
-- [ ] `resolve_market` → `redeem` on devnet → user's USDC moves — same harness, final steps
+- [x] program deploys to **devnet** at the pinned ID — deployed 2026-07-15, tx
+      `5Ayf6cLmSpqFue5odVvTVSBQSPMyJjyV6ndhp9FPu6F46CYDSkJucuDyPTpKMQvbpfv4XzC33v4bnfnaj4xXgVqa`
+- [x] one signed order → matched → **Go crank** settles on devnet — ed25519 verify +
+      fill-accounting + MINT executed, tx
+      `3zNVPQJqLZhAuRpEmCzGxVfA9aqQe3mm3qT1yFzcN34rrNqM1Eu2oyuagxvdcT51xTjW86ggzjNGhrbvYoKzvdXS`
+- [x] `resolve_market` → `redeem` on devnet → user's USDC moved 1:1 — txs
+      `5oNcWKQBin6atteQcvAAtEkdivE5q9hXKmYXWeNiKzrXrS7X2VJN2SvSe7pxQ8oCMvjrSjBMr2T9i1uWtVJfXiK8` /
+      `4qKCYL4G1VzsPighcWLQ6wgEfYBggHnFCkpHfomXBkWdCfVzrEHv4Ju3dLAwtKHNx62WEyV7Tvi2VqxeRSMWkMku`
+
+**THE FLOOR IS DONE.** `go run ./cmd/devnet-e2e` reproduces it end-to-end (all balance
+assertions green: 60/40 vault debits, complete set minted, pool 100% collateralized,
+1:1 redemption). Devnet RPC note: public endpoint rate-limits aggressive status polls —
+the harness and crank poll gently (1.5–2.5s) with long windows; a tx that "times out"
+usually landed (check `solana confirm`).
 
 ---
 
@@ -176,18 +182,14 @@ keeps the real hash-based seeds.
 
 ## 7. Next actions
 
-**Immediate (anyone):** fund the operator wallet
-`2rRndZBMURYnyZNY4b7Kvsmugn77dXchTmrzMub6A2fQ` with ~5 devnet SOL
-(faucet.solana.com — CLI faucet is rate-limited). Then, on `feat/devnet-settlement`:
-`solana program deploy target/deploy/pitchmarket.so --program-id target/deploy/pitchmarket-keypair.json -u devnet`
-followed by `cd backend && go run ./cmd/devnet-e2e` — that closes the floor.
+**E2:** **frontend** — the last unstarted scope, with the deadline TODAY. The backend
+serves everything it needs; wire `SOLANA_RPC_URL`/`OPERATOR_KEYPAIR` env to run the
+server in on-chain mode against the deployed program.
 
-**E2:** frontend — now the biggest unstarted scope.
+**E1:** `combo_accept` / `resolve_combo` → oracle tier d if TxODDS replies (cut-safe:
+combos run off-chain behind the interface seam).
 
-**E1:** after deploy, run the TS suite against devnet → `combo_accept` /
-`resolve_combo` → oracle tier d if TxODDS replies.
-
-**Both:** confirm the TxODDS email (decision #3).
+**Both:** confirm the TxODDS email (decision #3); record the demo.
 
 ---
 
@@ -209,6 +211,7 @@ Newest first. One row per meaningful change. **Append here in the same commit as
 
 | Date | Who | What changed | Verified how |
 |---|---|---|---|
+| 2026-07-15 | Ashish | **Program deployed to devnet** at the pinned ID; **Go crank settled a real match on devnet** (v0+ALT); gentler RPC polling in crank/harness (public devnet endpoint rate-limits) | `cmd/devnet-e2e` ✅ full run: initialize→vaults→deposits→engine MINT fill→**settle_match**→resolve→redeem, every balance asserted; tx sigs in §5 |
 | 2026-07-12 | Ashish | **Crank v0 + per-market ALT** (`crank/lut.go`, `BuildSettleMatchTxV0`); chain builders (initialize_market/init_vault/deposit/resolve/redeem) + `cmd/devnet-e2e` harness; committed program keypair (decision #1 closed); reproduced §4 fix on 2nd machine (Agave 4.1.1 → `.so` 419,400 B); pinned v0+ALT in interface-contract §6.5. **Devnet deploy blocked only on faucet SOL.** | `go test ./internal/crank` ✅ (v0 1116 B ≤ 1232, legacy 1421 B rejected; layout tests) · `cargo-build-sbf` ✅ on this machine · devnet run pending funds |
 | 2026-07-12 | Ashish | Merged PR #3 into main; reconciled this file across both tracks (E1 localnet results + E2 backend state + v0/ALT crank rework now tracked in §5/§7) | host `cargo test -p pitchmarket` ✅ · `go build`/`vet` + targeted Go suites ✅ on the merged tree |
 | 2026-07-13 | E1 | Added MERGE + cancel_order tests; refactored the TS harness into `tests/helpers.ts` (single borsh impl) | `npm test` **8/8 ✅** on `solana-test-validator` — all settle paths + cancel fail-closed |

@@ -134,6 +134,7 @@ func (e *env) run(programID solana.PublicKey) error {
 	submitter := crank.NewRPCSubmitter("", e.builder, e.operator)
 	submitter.Client = e.client
 	submitter.Tables = crank.NewLUTManager(e.client, e.builder, e.operator)
+	submitter.ConfirmTimeout = 150 * time.Second
 	settleSig, err := submitter.SettleMatch(e.ctx, fill)
 	if err != nil {
 		return fmt.Errorf("settle_match: %w", err)
@@ -324,8 +325,10 @@ func (e *env) sendWithSigners(ixs []solana.Instruction, payer solana.PrivateKey,
 	}); err != nil {
 		return "", err
 	}
+	maxRetries := uint(8)
 	sig, err := e.client.SendTransactionWithOpts(e.ctx, tx, rpc.TransactionOpts{
 		PreflightCommitment: rpc.CommitmentConfirmed,
+		MaxRetries:          &maxRetries,
 	})
 	if err != nil {
 		return "", err
@@ -337,9 +340,13 @@ func (e *env) sendWithSigners(ixs []solana.Instruction, payer solana.PrivateKey,
 }
 
 func (e *env) confirm(sig solana.Signature) error {
-	deadline := time.Now().Add(60 * time.Second)
+	// Generous window + history search: devnet status caches lag, and a tx
+	// frequently lands seconds after a naive poll gives up.
+	deadline := time.Now().Add(180 * time.Second)
+	var lastErr error
 	for time.Now().Before(deadline) {
-		st, err := e.client.GetSignatureStatuses(e.ctx, false, sig)
+		st, err := e.client.GetSignatureStatuses(e.ctx, true, sig)
+		lastErr = err
 		if err == nil && len(st.Value) > 0 && st.Value[0] != nil {
 			if st.Value[0].Err != nil {
 				return fmt.Errorf("tx %s reverted: %v", sig, st.Value[0].Err)
@@ -349,9 +356,9 @@ func (e *env) confirm(sig solana.Signature) error {
 				return nil
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(2500 * time.Millisecond)
 	}
-	return fmt.Errorf("tx %s not confirmed in time", sig)
+	return fmt.Errorf("tx %s not confirmed in time (last poll err: %v)", sig, lastErr)
 }
 
 func (e *env) tokenBalance(owner, mint solana.PublicKey) (uint64, error) {
