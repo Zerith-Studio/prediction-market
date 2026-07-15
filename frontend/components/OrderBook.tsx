@@ -107,9 +107,13 @@ function BookRow({ row, side, flash }: { row: Row; side: "bid" | "ask"; flash: n
         flash ? (isBid ? "animate-flash-up" : "animate-flash-down") : ""
       }`}
     >
+      {/* scaleX, not width: GPU-only, and the eased bar makes book movement
+          legible instead of flickery on every tick */}
       <span
-        className={`absolute inset-y-0 -z-0 ${isBid ? "left-0 bg-accent/[0.07]" : "right-0 bg-down/[0.07]"}`}
-        style={{ width: `${Math.max(3, row.depth * 100)}%` }}
+        className={`absolute inset-0 -z-0 transition-transform duration-200 ease-out-strong ${
+          isBid ? "origin-left bg-accent/[0.07]" : "origin-right bg-down/[0.07]"
+        }`}
+        style={{ transform: `scaleX(${Math.max(0.03, row.depth)})` }}
         aria-hidden
       />
       <span className={`relative z-10 ${isBid ? "text-accent" : "text-down"} tnum`}>

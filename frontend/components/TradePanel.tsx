@@ -98,11 +98,11 @@ export function TradePanel({
       <AnimatePresence>
         {error && (
           <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.16 }}
-            className="mb-3 font-mono text-[12px] text-down"
+            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+            animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
+            exit={{ opacity: 0, height: 0, marginBottom: 0, transition: { duration: 0.12 } }}
+            transition={{ duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
+            className="overflow-hidden font-mono text-[12px] text-down"
             role="alert"
           >
             {error}
@@ -113,7 +113,7 @@ export function TradePanel({
       <button
         onClick={place}
         disabled={!canSubmit}
-        className={`flex w-full items-center justify-center gap-2 px-5 py-3.5 text-[14px] font-semibold tracking-tight transition-colors disabled:cursor-not-allowed ${
+        className={`w-full px-5 py-3.5 text-[14px] font-semibold tracking-tight transition-[transform,filter,background-color,color] duration-150 ease-out-strong disabled:cursor-not-allowed enabled:active:scale-[0.98] ${
           locked
             ? "bg-line2 text-dim"
             : side === "buy"
@@ -121,17 +121,30 @@ export function TradePanel({
               : "bg-down text-bg hover:brightness-110 disabled:bg-line2 disabled:text-dim"
         }`}
       >
-        {submit === "signing" && <Loader2 size={15} className="animate-spin" />}
-        {submit === "placed" && <Check size={15} />}
-        {locked
-          ? "Trading closed"
-          : submit === "idle"
-            ? side === "buy"
-              ? "Sign & Buy YES"
-              : "Sign & Sell YES"
-            : submit === "signing"
-              ? "Signing…"
-              : "Resting on book"}
+        {/* keyed crossfade: the state morph is the feedback (rare, deliberate
+            action — worth animating); blur masks the two-states overlap */}
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span
+            key={locked ? "locked" : `${submit}-${submit === "idle" ? side : ""}`}
+            initial={{ opacity: 0, y: 5, filter: "blur(2px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: -5, filter: "blur(2px)", transition: { duration: 0.1 } }}
+            transition={{ duration: 0.13, ease: [0.23, 1, 0.32, 1] }}
+            className="flex items-center justify-center gap-2"
+          >
+            {submit === "signing" && <Loader2 size={15} className="animate-spin" />}
+            {submit === "placed" && <Check size={15} />}
+            {locked
+              ? "Trading closed"
+              : submit === "idle"
+                ? side === "buy"
+                  ? "Sign & Buy YES"
+                  : "Sign & Sell YES"
+                : submit === "signing"
+                  ? "Signing…"
+                  : "Resting on book"}
+          </motion.span>
+        </AnimatePresence>
       </button>
 
       <p className="mt-3 font-mono text-[11px] leading-relaxed text-dim">
@@ -158,15 +171,21 @@ function SideTab({
     <button
       onClick={onClick}
       aria-pressed={active}
-      className={`border-b-2 pb-2.5 text-[13px] font-semibold transition-colors ${
-        active
-          ? tone === "up"
-            ? "border-accent text-ink"
-            : "border-down text-ink"
-          : "border-line text-dim hover:text-muted"
+      className={`relative border-b-2 border-line pb-2.5 text-[13px] font-semibold transition-colors duration-150 ${
+        active ? "text-ink" : "text-dim hover:text-muted"
       }`}
     >
       {children}
+      {active && (
+        /* one underline shared across both tabs — the slide states the
+           segmented relationship; a jump reads as two unrelated buttons */
+        <motion.span
+          layoutId="trade-side-underline"
+          transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+          className={`absolute inset-x-0 -bottom-0.5 h-0.5 ${tone === "up" ? "bg-accent" : "bg-down"}`}
+          aria-hidden
+        />
+      )}
     </button>
   );
 }

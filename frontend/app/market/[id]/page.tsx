@@ -111,7 +111,7 @@ function NotFound({ status }: { status: number }) {
       </p>
       <Link
         href="/"
-        className="font-mono text-[13px] text-accent transition-colors hover:brightness-110"
+        className="font-mono text-[13px] text-accent transition-[filter] hover:brightness-125"
       >
         ← Back to markets
       </Link>
