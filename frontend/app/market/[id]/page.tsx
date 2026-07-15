@@ -11,9 +11,11 @@ import { RecentFills } from "@/components/RecentFills";
 import { TradePanel } from "@/components/TradePanel";
 import { PitchTicker } from "@/components/PitchTicker";
 import { MarketSkeleton } from "@/components/Skeletons";
+import { usePitchWallet } from "@/lib/wallet";
 
 export default function MarketPage({ params }: { params: { id: string } }) {
-  const m = useLiveMarket(params.id);
+  const wallet = usePitchWallet();
+  const m = useLiveMarket(params.id, wallet.address);
   const up = m.priceDelta >= 0;
 
   return (
@@ -57,8 +59,10 @@ export default function MarketPage({ params }: { params: { id: string } }) {
                   </p>
                 </div>
                 <div className="hidden text-right font-mono text-[12px] text-dim sm:block">
-                  <div className="text-muted tnum">$18.4k</div>
-                  <div>24h volume</div>
+                  <div className="text-muted tnum">
+                    {"$" + (m.fills.reduce((a, f) => a + f.price * f.size, 0) / 100).toLocaleString()}
+                  </div>
+                  <div>session volume</div>
                 </div>
               </div>
 
@@ -78,9 +82,12 @@ export default function MarketPage({ params }: { params: { id: string } }) {
               <div className="lg:rule-l lg:pl-10">
                 <div className="lg:sticky lg:top-[76px]">
                   <TradePanel
+                    marketId={params.id}
+                    marketTitle={m.market.title}
                     yesPrice={m.yesPrice}
                     balanceMicro={m.balanceMicro}
                     marketStatus={m.market.status}
+                    onPlaced={m.refreshBalance}
                   />
                 </div>
               </div>
@@ -111,7 +118,7 @@ function NotFound({ status }: { status: number }) {
       </p>
       <Link
         href="/"
-        className="font-mono text-[13px] text-accent transition-colors hover:brightness-110"
+        className="font-mono text-[13px] text-accent transition-[filter] hover:brightness-125"
       >
         ← Back to markets
       </Link>

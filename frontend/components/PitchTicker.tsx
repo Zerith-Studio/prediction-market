@@ -8,13 +8,15 @@ export function PitchTicker({ lines, index }: { lines: string[]; index: number }
     <div className="flex items-center gap-4 py-3">
       <span className="shrink-0 eyebrow">Pitch AI</span>
       <div className="relative h-[19px] flex-1">
-        <AnimatePresence mode="wait" initial={false}>
+        {/* concurrent crossfade (items are absolutely positioned, so no layout
+            jump); mode="wait" would serialize exit→enter with a blank gap */}
+        <AnimatePresence initial={false}>
           <motion.p
             key={index}
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+            exit={{ opacity: 0, y: -6, transition: { duration: 0.2, ease: [0.23, 1, 0.32, 1] } }}
+            transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
             className="absolute inset-0 truncate text-[13px] italic text-muted"
           >
             {lines[index]}

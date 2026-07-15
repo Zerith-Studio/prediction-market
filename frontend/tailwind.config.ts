@@ -1,6 +1,11 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
+  future: {
+    // gate every hover: behind (hover:hover) and (pointer:fine) — touch
+    // devices trigger hover on tap, leaving sticky false hover states
+    hoverOnlyWhenSupported: true,
+  },
   content: [
     "./app/**/*.{ts,tsx}",
     "./components/**/*.{ts,tsx}",
@@ -21,6 +26,11 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+      },
+      transitionTimingFunction: {
+        // stock ease-out is too weak to feel intentional; one strong curve,
+        // used consistently (easing.dev "strong out")
+        "out-strong": "cubic-bezier(0.23, 1, 0.32, 1)",
       },
       borderRadius: {
         // sharp by default

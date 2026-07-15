@@ -22,9 +22,12 @@ type Template struct {
 	Scale float64
 }
 
-// Registry — the demo set: the 1X2 mutex trio, a totals line, BTTS, and two
-// precision pools.
+// Registry — the 1X2 mutex trio, totals, BTTS, two precision pools, and the
+// two markets TxLINE's free World Cup tier prices live (dnb_home, ou_1h_075 —
+// the MM bot only quotes markets with a real feed price).
 var Registry = []Template{
+	{Key: "dnb_home", Type: "binary", Title: "%s to win · draw no bet", Rule: "Settles YES if %s win in regulation; VOID (refund) on a draw.", MutexGroup: "result_dnb"},
+	{Key: "ou_1h_075", Type: "binary", Title: "First-half goal", Rule: "Settles YES with 1+ goal before half time (O/U 0.75, 1H).", MutexGroup: "h1_goals"},
 	{Key: "home_win", Type: "binary", Title: "%s to win", Rule: "Settles YES if %s win in regulation (90' + stoppage).", MutexGroup: "result"},
 	{Key: "draw", Type: "binary", Title: "%s vs %s: draw", Rule: "Settles YES if the match ends level in regulation.", MutexGroup: "result"},
 	{Key: "away_win", Type: "binary", Title: "%s to win", Rule: "Settles YES if %s win in regulation (90' + stoppage).", MutexGroup: "result"},
@@ -53,7 +56,7 @@ func MarketID(fixtureID, templateKey string) [32]byte {
 // Title renders the display title for a fixture's sides.
 func (t Template) RenderTitle(home, away string) string {
 	switch t.Key {
-	case "home_win":
+	case "home_win", "dnb_home":
 		return fmt.Sprintf(t.Title, home)
 	case "away_win":
 		return fmt.Sprintf(t.Title, away)
@@ -67,7 +70,7 @@ func (t Template) RenderTitle(home, away string) string {
 // RenderRule renders the settlement rule text.
 func (t Template) RenderRule(home, away string) string {
 	switch t.Key {
-	case "home_win":
+	case "home_win", "dnb_home":
 		return fmt.Sprintf(t.Rule, home)
 	case "away_win":
 		return fmt.Sprintf(t.Rule, away)

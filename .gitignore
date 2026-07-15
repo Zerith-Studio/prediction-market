@@ -18,3 +18,7 @@ out
 # Local env
 .env
 .env.local
+
+# runtime state / credentials
+.pitchmarket-usdc
+.txline-credentials.json

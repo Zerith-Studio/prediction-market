@@ -41,7 +41,13 @@ export function MatchHero({ match }: { match: Match }) {
           </span>
         </div>
         <div className="min-w-0 truncate eyebrow">
-          World Cup 2026 · Group C · MetLife Stadium
+          {live || match.status === "ft"
+            ? "TxLINE live data · settled on Solana"
+            : `Kickoff ${new Date(match.kickoff_at).toLocaleString(undefined, {
+                weekday: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}`}
         </div>
       </div>
 
