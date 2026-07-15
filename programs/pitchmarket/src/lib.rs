@@ -466,31 +466,35 @@ pub struct SettleMatch<'info> {
     // Which of market.{yes,no}_mint each of these must equal depends on the
     // runtime taker.outcome/maker.outcome — checked explicitly in the handler
     // rather than via a static `address =` constraint.
+    //
+    // Accounts are Boxed to keep them off the BPF stack: this context has 18
+    // accounts and the generated `try_accounts` otherwise overflows the 4KB
+    // frame. Boxing moves the deserialized data to the heap.
     #[account(mut)]
-    pub taker_outcome_mint: Account<'info, Mint>,
+    pub taker_outcome_mint: Box<Account<'info, Mint>>,
     #[account(mut)]
-    pub maker_outcome_mint: Account<'info, Mint>,
+    pub maker_outcome_mint: Box<Account<'info, Mint>>,
     #[account(mut, seeds = [b"pool", market.market_id.as_ref()], bump)]
-    pub pool_usdc: Account<'info, TokenAccount>,
+    pub pool_usdc: Box<Account<'info, TokenAccount>>,
 
     #[account(init_if_needed, payer = operator, space = OrderStatus::SPACE, seeds = [b"ostatus", sig_verify::order_hash(&taker).as_ref()], bump)]
-    pub taker_order_status: Account<'info, OrderStatus>,
+    pub taker_order_status: Box<Account<'info, OrderStatus>>,
     #[account(init_if_needed, payer = operator, space = OrderStatus::SPACE, seeds = [b"ostatus", sig_verify::order_hash(&maker).as_ref()], bump)]
-    pub maker_order_status: Account<'info, OrderStatus>,
+    pub maker_order_status: Box<Account<'info, OrderStatus>>,
 
     #[account(seeds = [b"vault", taker.maker.as_ref()], bump)]
-    pub taker_vault: Account<'info, Vault>,
+    pub taker_vault: Box<Account<'info, Vault>>,
     #[account(seeds = [b"vault", maker.maker.as_ref()], bump)]
-    pub maker_vault: Account<'info, Vault>,
+    pub maker_vault: Box<Account<'info, Vault>>,
 
     #[account(mut, associated_token::mint = market.usdc_mint, associated_token::authority = taker_vault)]
-    pub taker_usdc_ata: Account<'info, TokenAccount>,
+    pub taker_usdc_ata: Box<Account<'info, TokenAccount>>,
     #[account(mut, associated_token::mint = market.usdc_mint, associated_token::authority = maker_vault)]
-    pub maker_usdc_ata: Account<'info, TokenAccount>,
+    pub maker_usdc_ata: Box<Account<'info, TokenAccount>>,
     #[account(mut, associated_token::mint = taker_outcome_mint, associated_token::authority = taker_vault)]
-    pub taker_outcome_ata: Account<'info, TokenAccount>,
+    pub taker_outcome_ata: Box<Account<'info, TokenAccount>>,
     #[account(mut, associated_token::mint = maker_outcome_mint, associated_token::authority = maker_vault)]
-    pub maker_outcome_ata: Account<'info, TokenAccount>,
+    pub maker_outcome_ata: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
     pub operator: Signer<'info>,

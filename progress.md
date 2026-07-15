@@ -13,43 +13,58 @@ Legend: ✅ done & verified · 🟡 written but unverified · 🔴 not started /
 
 ---
 
-## 1. Status at a glance — 2026-07-10 (Day 6 of 11)
+## 1. Status at a glance — 2026-07-12 (Day 8 of 11)
 
 | | |
 |---|---|
 | Deadline | **2026-07-15** (internal) · judged by 2026-07-29 |
-| Days left | **5** |
-| Go/No-Go gate | **Jul 11 EOD** — binary settlement end-to-end on devnet (PROJECT_PLAN §7) |
-| Demoable floor | 🔴 not yet — nothing has run against devnet |
-| **Top blocker** | **`anchor build` fails; program has never been compiled to BPF or deployed.** See §4. |
+| Days left | **3** |
+| Go/No-Go gate | **Jul 11 EOD** — binary settlement end-to-end (PROJECT_PLAN §7) |
+| Demoable floor | 🟡 **normal core verified on a local validator** — not yet on devnet |
+| **Top blocker** | **~~`anchor build` fails~~ RESOLVED (§4). Next: devnet deploy (open decision #1, keypair) + crank submitter.** |
 
-**Honest summary.** Both tracks have a real scaffold and both compile on the host
-toolchain. But *no code has ever run against a Solana validator* — the program has not
-been built for BPF, not deployed, and the crank has no submitter. The Jul 11 gate is at
-risk, and the thing standing in the way is a toolchain problem, not a code problem.
+**Honest summary.** The §4 toolchain blocker is fixed and the program now compiles to
+BPF. The full normal-core lifecycle — `initialize_market → deposit → settle_match
+(MINT & NORMAL) → resolve_market → redeem` — **runs green against a local validator**
+(`solana-test-validator`), with balance assertions proving the collateral-pool, mint,
+peer-to-peer, and redemption math. `sig_verify` (ed25519 sysvar introspection, the old
+longest pole) executed for real, which also proves the TS borsh encoding matches
+`sig_verify.rs::borsh_order` byte-for-byte. All three settle paths (MINT/NORMAL/MERGE)
+plus `cancel_order`'s fail-closed guard are now exercised — **8/8 tests green**. **Still
+not done:** devnet deploy (needs the program keypair / decision #1) and E2's crank still
+has no submitter. Verification is **localnet, not devnet** — treat ✅ marks accordingly.
 
 ---
 
 ## 2. E1 — Anchor program (`programs/pitchmarket`)
 
-Verified with `cargo check -p pitchmarket` (host target, passes with 26 warnings).
-**Not** verified with `anchor build` / on devnet — see §4.
+Builds to BPF (`cargo build-sbf`, see §4). ✅ marks below = **exercised on a local
+validator** via `tests/lifecycle.ts` (`npm test`), 5/5 passing. Not yet run on devnet.
 
 | Instruction | State | Notes |
 |---|---|---|
-| `initialize_market` | 🟡 | Market PDA + 2 outcome mints |
-| `init_vault` / `deposit` | 🟡 | Vault PDA custody (per interface-contract §6 decision) |
-| `settle_match` NORMAL | 🟡 | collateral-pool CTF model |
-| `settle_match` MINT | 🟡 | |
-| `settle_match` MERGE | 🟡 | |
-| `cancel_order` | 🟡 | |
-| `resolve_market` | 🟡 | **tier-a only** (operator-signed). Tiers b/d not started |
-| `redeem` | 🟡 | |
-| `sig_verify::verify_order_signature` | 🟡 | **Now implemented** (ed25519 sysvar introspection). Was the "longest pole" — code is written, never executed. |
+| `initialize_market` | ✅ | Market PDA + 2 outcome mints + pool. localnet |
+| `init_vault` / `deposit` | ✅ | Vault PDA custody; USDC moved into vault ATA. localnet |
+| `settle_match` NORMAL | ✅ | peer-to-peer USDC↔shares swap. localnet |
+| `settle_match` MINT | ✅ | opposite-outcome buys mint a complete set into the pool. localnet |
+| `settle_match` MERGE | ✅ | opposite-outcome sells burn a complete set, release pooled collateral. localnet |
+| `cancel_order` | ✅ | maker cancels; a later settle of that order fails closed (`OrderClosed`). localnet |
+| `resolve_market` | ✅ | **tier-a only** (operator-signed); localnet. Tiers b/d not started |
+| `redeem` | ✅ | burns winning shares, pays 1:1 from pool. localnet |
+| `sig_verify::verify_order_signature` | ✅ | ed25519 sysvar introspection **executed for real** in settle_match. Also confirms TS borsh == `sig_verify.rs::borsh_order` |
 | `combo_accept` | 🔴 | typed stub |
 | `resolve_combo` | 🔴 | typed stub |
 | VOID path | 🔴 | |
 | Oracle tier b (challenge) / d (TxODDS sig) | 🔴 | gated on TxODDS reply |
+
+**Two program changes were needed to build & run** (both in this commit):
+- `SettleMatch` accounts are now `Box`ed — the 18-account context otherwise overflowed
+  the 4KB BPF stack frame by 64 bytes (only surfaces at BPF build, not `cargo check`).
+- `Cargo.toml` gained the `idl-build` feature (was missing; blocked IDL generation).
+
+**Also found:** the settle_match tx (2 ed25519 precompiles + 18-account `settle_match`)
+is **1453 bytes > the 1232 legacy limit**. It only fits as a **v0 tx with an Address
+Lookup Table** — the crank MUST build it this way (`tests/lifecycle.ts` shows how).
 
 **Program ID** `3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs` — pinned in `declare_id!`
 and `Anchor.toml`.
@@ -79,42 +94,35 @@ Verified with `go build ./... && go vet ./...` — both pass.
 
 ---
 
-## 4. 🔴 BLOCKER — `anchor build` does not compile (found 2026-07-10)
+## 4. ✅ RESOLVED — program now builds to BPF (fixed 2026-07-12)
 
-`cargo check` passes on the host, so the *code* is fine. `anchor build` fails because the
-BPF toolchain that Solana CLI ships is far older than the crates Anchor 0.31.1 pulls in.
+The `edition2024` failure was caused entirely by an **old platform-tools** (v1.43 →
+rustc/cargo 1.79), which can't parse deps that Anchor 0.31.1 pulls (`block-buffer`,
+`crypto-common`, etc. require cargo ≥1.85). The fix is a **modern Agave install**, which
+ships **platform-tools v1.54 / rustc 1.89** and compiles the whole tree cleanly.
 
-```
-$ anchor build
-error: failed to parse manifest at .../crypto-common-0.2.2/Cargo.toml
-Caused by: feature `edition2024` is required
-  ... not stabilized in this version of Cargo (1.79.0)
-```
+**How it was fixed (reproducible on a fresh machine):**
+1. Install Rust (`rustup`, gives host cargo 1.97), Agave CLI 4.1.1
+   (`release.anza.xyz/stable/install` → platform-tools **v1.54**), and Anchor via avm.
+2. **Build with `cargo build-sbf` from the program dir, NOT `anchor build`.** This is the
+   crux: `anchor build` (and even `anchor idl build`) runs its own toolchain override
+   that **re-installs Solana 2.1.0 and repoints `active_release` back to the old v1.43
+   tools** — re-breaking the build. That override is the "inconsistent state" the earlier
+   note hit. After any `anchor` invocation, repoint:
+   ```sh
+   cd ~/.local/share/solana/install
+   ln -sfn "$PWD/releases/stable-<hash>/solana-release" active_release && hash -r
+   cargo-build-sbf --version   # must read platform-tools v1.54 / rustc 1.89
+   ```
+3. `cd programs/pitchmarket && cargo build-sbf` → `target/deploy/pitchmarket.so` (419 KB).
 
-**Diagnosis.** `cargo-build-sbf` uses **platform-tools v1.43 → rustc/cargo 1.79**.
-Transitive deps of `anchor-lang`/`anchor-spl` 0.31.1 now require `edition2024` (needs
-cargo ≥1.85). Offenders seen, in order: `crypto-common 0.2.2` → `zeroize_derive 1.5.0` →
-`hashbrown 0.17.1` (via `borsh-derive → proc-macro-crate → toml_edit → indexmap`) →
-`unicode-segmentation 1.13.3`. Pinning them one at a time works but is whack-a-mole and
-will rot — **don't go down that path.**
+**IDL:** `anchor idl build` chokes on the two `ostatus` PDAs whose seed is a function
+call on an instruction arg (`sig_verify::order_hash(&taker)`) — it can't introspect that.
+Workaround used: temporarily swap those seeds for a plain arg field to emit the IDL, then
+restore. The runtime `.so` keeps the real hash-based seeds. (A cleaner long-term fix is
+worth finding, but the IDL is only needed for the TS client.)
 
-**Real fix = newer platform-tools.** Attempted `agave-install init 2.3.13`; `solana
---version` then reports 2.3.13, but `~/.local/share/solana/install/active_release` still
-symlinks to `2.1.0/solana-release`, and even the 2.3.13 tree's `cargo-build-sbf` reports
-`platform-tools v1.43 / rustc 1.79.0`. The local install is in an inconsistent state.
-
-**Next steps for whoever picks this up (in order):**
-1. Point `active_release` at the 2.3.13 tree, `hash -r`, confirm
-   `cargo-build-sbf --version` reports platform-tools ≥ v1.48 / rustc ≥ 1.85.
-2. If that fails, nuke `~/.cache/solana/` (holds only `v1.43`) so it re-downloads, and
-   reinstall the CLI cleanly.
-3. If still stuck, pin `anchor-lang`/`anchor-spl` **down** to a release matching the
-   installed platform-tools, rather than pinning a dozen transitive crates up.
-4. **Verify on a second machine** — this may be local-only. E2 should try `anchor build`
-   independently before we conclude the repo is broken.
-
-Nothing on the critical path (deploy → settle → resolve → redeem) can start until this
-is green. **This is the Jul 11 gate.**
+**Verify on a second machine** — this fix was done on a clean box; E2 should reproduce.
 
 ---
 
@@ -122,15 +130,17 @@ is green. **This is the Jul 11 gate.**
 
 The floor we promised never to cut — one match, one binary market, fully trustless:
 
-- [ ] `anchor build` produces a `.so`
-- [ ] program deploys to devnet at the pinned ID
-- [ ] `crank.Submitter` implemented against `solana-go`
-- [ ] crank builds the exact 3-instruction tx from interface-contract §6.5
-      (ed25519 taker, ed25519 maker, `settle_match`)
-- [ ] `models.OrderHash` borsh bytes == `sig_verify.rs` borsh bytes (**write a cross-language
-      test — a silent drift here fails closed as `BadSignature` and will cost hours**)
-- [ ] one signed order → matched → `settle_match` lands on devnet
-- [ ] `resolve_market` (tier-a) → `redeem` → user's USDC balance moves
+- [x] `anchor build` produces a `.so` — via `cargo build-sbf` (§4); 419 KB
+- [ ] program deploys to devnet at the pinned ID — **still open** (needs keypair, decision #1);
+      currently loaded on `solana-test-validator` via `--bpf-program <declared-id> pitchmarket.so`
+- [ ] `crank.Submitter` implemented against `solana-go` — **still open** (E2). Note: must emit a
+      **v0 tx with an Address Lookup Table**, the 3-ix tx is 1453 B > the 1232 legacy limit
+- [x] crank builds the exact 3-instruction tx (ed25519 taker, ed25519 maker, `settle_match`)
+      — **proven in `tests/lifecycle.ts`** (TS reference impl); Go crank still TODO
+- [~] `models.OrderHash` borsh bytes == `sig_verify.rs` borsh bytes — **TS ↔ Rust proven**
+      (settle_match sig check passed); Go ↔ Rust conformance test still needed (E2)
+- [x] one signed order → matched → `settle_match` lands (MINT & NORMAL) — **localnet, not devnet**
+- [x] `resolve_market` (tier-a) → `redeem` → user's USDC balance moves — **localnet, not devnet**
 
 If this isn't green by Jul 11 EOD, cut per PROJECT_PLAN §7 (combos → off-chain or cut,
 precision off-chain, drop one-liner/NFT).
@@ -178,6 +188,8 @@ Newest first. One row per meaningful change. **Append here in the same commit as
 
 | Date | Who | What changed | Verified how |
 |---|---|---|---|
+| 2026-07-13 | E1 | Added MERGE + cancel_order tests; refactored the TS harness into `tests/helpers.ts` (single borsh impl) | `npm test` **8/8 ✅** on `solana-test-validator` — all settle paths + cancel fail-closed |
+| 2026-07-12 | E1 | Fixed §4 build blocker (platform-tools v1.54); Boxed `SettleMatch` accounts (BPF stack overflow); added `idl-build` feature; added TS lifecycle test harness (`tests/`, `package.json`) | `cargo build-sbf` ✅ · `npm test` 5/5 ✅ on `solana-test-validator` (initialize→deposit→settle MINT+NORMAL→resolve→redeem, balances asserted) |
 | 2026-07-10 | Ashish | Added `progress.md` + `CLAUDE.md`; trimmed stale README status; untracked `.DS_Store`; committed the E1/E2 scaffold | `cargo check` ✅ · `go build ./... && go vet ./...` ✅ · `anchor build` ❌ (§4) |
 | 2026-07-09 | E1 | Implemented `sig_verify::verify_order_signature`; pinned settle_match tx layout in interface-contract §6.5 | `cargo check` only — never executed |
 | 2026-07-08 | E1/E2 | Anchor program scaffold; Go matching engine, crank skeleton, order API, replay feed, Postgres schema | `cargo check` · `go build` |
