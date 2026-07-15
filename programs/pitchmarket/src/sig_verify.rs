@@ -114,3 +114,75 @@ pub fn borsh_order(o: &OrderArgs) -> Vec<u8> {
 pub fn order_hash(o: &OrderArgs) -> [u8; 32] {
     anchor_lang::solana_program::hash::hash(&borsh_order(o)).to_bytes()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anchor_lang::AnchorSerialize;
+
+    /// Must stay byte-identical to goldenOrder() in
+    /// backend/internal/models/hash_conformance_test.go. If either side's
+    /// encoder drifts, its golden test fails — a silent drift would fail closed
+    /// on-chain as BadSignature with no useful error.
+    fn golden_order() -> OrderArgs {
+        let mut maker = [0u8; 32];
+        let mut market_id = [0u8; 32];
+        for i in 0..32 {
+            maker[i] = (i + 1) as u8;
+            market_id[i] = (i + 33) as u8;
+        }
+        OrderArgs {
+            maker: Pubkey::new_from_array(maker),
+            market_id,
+            outcome: 1, // YES
+            side: 0,    // BUY
+            price: 61,
+            size: 1_000_000,
+            fee_bps: 0,
+            expiry: 1_700_000_000,
+            salt: 0xDEAD_BEEF,
+        }
+    }
+
+    const GOLDEN_BORSH_HEX: &str =
+        "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\
+         2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40\
+         01003d0040420f0000000000000000f1536500000000efbeadde00000000";
+    const GOLDEN_HASH_HEX: &str =
+        "92d9ef2fb291b8dda3f183d40973d85be3bb73398f2b3d4db9d12511bbccba7e";
+
+    fn to_hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn test_borsh_order_golden_vector() {
+        let encoded = borsh_order(&golden_order());
+        assert_eq!(encoded.len(), 94, "borsh(Order) must be 94 bytes");
+        assert_eq!(
+            to_hex(&encoded),
+            GOLDEN_BORSH_HEX.replace(char::is_whitespace, ""),
+            "borsh encoding drifted from the golden vector pinned with hash.go"
+        );
+    }
+
+    #[test]
+    fn test_order_hash_golden_vector() {
+        assert_eq!(
+            to_hex(&order_hash(&golden_order())),
+            GOLDEN_HASH_HEX,
+            "order hash drifted from the golden vector pinned with hash.go"
+        );
+    }
+
+    /// borsh_order must also agree with AnchorSerialize (how OrderArgs travels
+    /// in settle_match instruction data) — all fields are fixed-width, so the
+    /// hand-rolled encoding and derive(AnchorSerialize) must coincide.
+    #[test]
+    fn test_borsh_order_matches_anchor_serialize() {
+        let order = golden_order();
+        let mut anchor_encoded = Vec::new();
+        order.serialize(&mut anchor_encoded).unwrap();
+        assert_eq!(borsh_order(&order), anchor_encoded);
+    }
+}
