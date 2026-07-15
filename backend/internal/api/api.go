@@ -11,6 +11,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gagliardetto/solana-go"
+
+	"github.com/Zerith-Studio/prediction-market/backend/internal/crank"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/exchange"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/lifecycle"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/matching"
@@ -26,12 +29,19 @@ type Server struct {
 	hub       *ws.Hub
 	rfq       *rfq.Service
 	lifecycle *lifecycle.Service
+	chain     *crank.ChainOps // nil = off-chain mirror mode
 	log       *slog.Logger
 }
 
 func New(ex *exchange.Exchange, st *store.Store, hub *ws.Hub, rfqSvc *rfq.Service,
 	lc *lifecycle.Service, log *slog.Logger) *Server {
 	return &Server{ex: ex, store: st, hub: hub, rfq: rfqSvc, lifecycle: lc, log: log}
+}
+
+// WithChain enables the real on-chain deposit flow.
+func (s *Server) WithChain(c *crank.ChainOps) *Server {
+	s.chain = c
+	return s
 }
 
 // WithCORS wraps the mux for browser clients (the Next.js frontend). Demo
@@ -86,6 +96,8 @@ func (s *Server) Routes() *http.ServeMux {
 
 	// Wallet / portfolio
 	mux.HandleFunc("POST /wallet/deposit", s.handleDeposit)
+	mux.HandleFunc("POST /wallet/deposit-init", s.handleDepositInit)
+	mux.HandleFunc("POST /wallet/deposit-complete", s.handleDepositComplete)
 	mux.HandleFunc("GET /balance", s.handleBalance)
 	mux.HandleFunc("GET /portfolio", s.handlePortfolio)
 
@@ -558,6 +570,69 @@ func (s *Server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 
 // ---- wallet / portfolio ----
 
+// handleDepositInit starts the REAL deposit: the server builds an
+// operator-cosigned tx (SOL top-up, USDC mint-to, init_vault, deposit) and the
+// wallet signs the returned message bytes — the product's one signing popup.
+func (s *Server) handleDepositInit(w http.ResponseWriter, r *http.Request) {
+	if s.chain == nil {
+		httpError(w, http.StatusConflict, "server is in off-chain mirror mode — use POST /wallet/deposit")
+		return
+	}
+	var req struct {
+		Wallet string `json:"wallet"`
+		Amount uint64 `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	pk, err := models.ParsePubkey(req.Wallet)
+	if err != nil || req.Amount == 0 {
+		httpError(w, http.StatusBadRequest, "wallet (base58) and amount (micro-USDC) required")
+		return
+	}
+	id, msgB64, err := s.chain.PrepareDeposit(r.Context(), solana.PublicKeyFromBytes(pk[:]), req.Amount)
+	if err != nil {
+		httpError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deposit_id": id, "message_b64": msgB64})
+}
+
+func (s *Server) handleDepositComplete(w http.ResponseWriter, r *http.Request) {
+	if s.chain == nil {
+		httpError(w, http.StatusConflict, "server is in off-chain mirror mode")
+		return
+	}
+	var req struct {
+		DepositID string `json:"deposit_id"`
+		Wallet    string `json:"wallet"`
+		Amount    uint64 `json:"amount"`
+		Sig       string `json:"sig"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	sig, err := models.ParseSig(req.Sig)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	txSig, err := s.chain.CompleteDeposit(r.Context(), req.DepositID, sig)
+	if err != nil {
+		httpError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	// Mirror the confirmed on-chain deposit into the soft-lock ledger.
+	b, err := s.store.Deposit(r.Context(), req.Wallet, req.Amount)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tx": txSig, "balance": b})
+}
+
 // handleDeposit mirrors an on-chain vault deposit into the demo ledger.
 func (s *Server) handleDeposit(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -620,11 +695,23 @@ func (s *Server) handlePortfolio(w http.ResponseWriter, r *http.Request) {
 	}
 	posOut := make([]map[string]any, len(positions))
 	for i, p := range positions {
+		// Mark for unrealized PnL: the best price the position could exit at
+		// NOW (unified YES ladder best bid — BBP).
+		book := s.ex.Book(p.MarketID)
+		bestBid := 0
+		if len(book.Bids[1]) > 0 {
+			bestBid = int(book.Bids[1][0].Price)
+		}
+		if len(book.Asks[0]) > 0 && 100-int(book.Asks[0][0].Price) > bestBid {
+			bestBid = 100 - int(book.Asks[0][0].Price)
+		}
 		posOut[i] = map[string]any{
 			"market_id": models.HashString(p.MarketID),
 			"yes":       p.Yes, "no": p.No,
 			"yes_locked": p.YesLocked, "no_locked": p.NoLocked,
 			"avg_cost": p.AvgCost,
+			"realized": p.Realized,
+			"best_bid": bestBid,
 		}
 	}
 	orders, err := s.store.OrdersByMaker(ctx, wallet)
