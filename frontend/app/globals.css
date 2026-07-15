@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-bg text-ink font-sans antialiased;
+    background-image: radial-gradient(
+      1200px 600px at 72% -12%,
+      rgba(18, 32, 58, 0.6) 0%,
+      transparent 55%
+    );
+    background-attachment: fixed;
+  }
+  /* tabular numerals everywhere numbers live */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+  ::selection {
+    background: rgba(0, 224, 255, 0.25);
+  }
+  :focus-visible {
+    outline: 2px solid theme("colors.verify");
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  /* broadcast pitch-stripe texture for the match hero */
+  .pitch-stripes {
+    background-image: repeating-linear-gradient(
+      115deg,
+      #0d1420 0 34px,
+      #0f1826 34px 68px
+    );
+  }
+  .panel {
+    @apply rounded-2xl border border-line bg-panel;
+  }
+}
+
+/* Motion budget: every broadcast moment degrades to instant/crossfade. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
