@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePitchWallet } from "@/lib/wallet";
 import { api, explorerTx } from "@/lib/api";
 import type { Portfolio, Position } from "@/lib/types";
 import { usd, shares as fmtShares, shortHash } from "@/lib/format";
@@ -29,15 +30,16 @@ function calc(p: Position): PosCalc {
 }
 
 export default function PortfolioPage() {
+  const wallet = usePitchWallet();
   const [pf, setPf] = useState<Portfolio | null>(null);
 
   useEffect(() => {
     let alive = true;
-    api.getPortfolio("demo").then((r) => alive && setPf(r));
+    api.getPortfolio(wallet.address).then((r) => alive && setPf(r));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [wallet.address]);
 
   const positions = pf?.positions.map(calc) ?? [];
   const totalValue = positions.reduce((a, x) => a + x.valueMicro, 0);

@@ -1,6 +1,7 @@
 "use client";
 
 import { MotionConfig } from "framer-motion";
+import { PitchWalletProvider } from "@/lib/wallet";
 
 /**
  * MotionConfig reducedMotion="user": the globals.css kill-switch only zeroes
@@ -10,5 +11,9 @@ import { MotionConfig } from "framer-motion";
  * fewer and gentler, not zero).
  */
 export function Providers({ children }: { children: React.ReactNode }) {
-  return <MotionConfig reducedMotion="user">{children}</MotionConfig>;
+  return (
+    <MotionConfig reducedMotion="user">
+      <PitchWalletProvider>{children}</PitchWalletProvider>
+    </MotionConfig>
+  );
 }

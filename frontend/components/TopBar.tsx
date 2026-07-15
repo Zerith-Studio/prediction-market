@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usd } from "@/lib/format";
+import { usePitchWallet } from "@/lib/wallet";
 
 const NAV: { label: string; href: string }[] = [
   { label: "Markets", href: "/" },
@@ -12,6 +13,7 @@ const NAV: { label: string; href: string }[] = [
 ];
 
 export function TopBar({ balanceMicro }: { balanceMicro: number }) {
+  const wallet = usePitchWallet();
   const path = usePathname();
   const isActive = (href: string) =>
     href === "/" ? path === "/" || path.startsWith("/market") : path.startsWith(href) && href !== "#";
@@ -46,16 +48,37 @@ export function TopBar({ balanceMicro }: { balanceMicro: number }) {
         </div>
 
         <div className="flex items-center gap-5">
-          <div className="hidden font-mono text-[12.5px] text-muted tnum sm:block">
-            <span className="text-dim">vault</span>{" "}
-            <span className="text-ink">{usd(balanceMicro)}</span>
-          </div>
-          <button className="font-mono text-[12.5px] text-muted transition-colors hover:text-ink">
-            <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-accent align-middle" />
-            7xQp…4mF2
-          </button>
+          {wallet.address && (
+            <div className="hidden font-mono text-[12.5px] text-muted tnum sm:block">
+              <span className="text-dim">vault</span>{" "}
+              <span className="text-ink">{usd(balanceMicro)}</span>
+            </div>
+          )}
+          {wallet.address ? (
+            <button
+              onClick={wallet.disconnect}
+              title="Disconnect"
+              className="font-mono text-[12.5px] text-muted transition-colors hover:text-ink"
+            >
+              <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-accent align-middle" />
+              {short(wallet.address)}
+              {wallet.isDemo && <span className="ml-1.5 text-dim">demo</span>}
+            </button>
+          ) : (
+            <button
+              onClick={wallet.connect}
+              disabled={!wallet.ready}
+              className="font-mono text-[12.5px] text-accent transition-[filter] hover:brightness-110 disabled:text-dim"
+            >
+              Connect wallet
+            </button>
+          )}
         </div>
       </div>
     </header>
   );
+}
+
+function short(addr: string): string {
+  return `${addr.slice(0, 4)}…${addr.slice(-4)}`;
 }

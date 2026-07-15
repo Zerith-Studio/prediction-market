@@ -3,51 +3,128 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, Loader2 } from "lucide-react";
+import bs58 from "bs58";
 import type { MarketStatus, Side } from "@/lib/types";
 import { buyCostMicro, maxPayoutMicro, usd } from "@/lib/format";
+import { api, ApiError } from "@/lib/api";
+import { borshOrder, fromHex, randomSalt, toHex } from "@/lib/borsh";
+import { usePitchWallet } from "@/lib/wallet";
 
 type SubmitState = "idle" | "signing" | "placed";
 
 export function TradePanel({
+  marketId,
+  marketTitle,
   yesPrice,
   balanceMicro,
   marketStatus,
+  onPlaced,
 }: {
+  marketId: string;
+  marketTitle: string;
   yesPrice: number;
   balanceMicro: number;
   marketStatus: MarketStatus;
+  onPlaced?: () => void;
 }) {
+  const wallet = usePitchWallet();
   const [side, setSide] = useState<Side>("buy");
   const [price, setPrice] = useState(String(yesPrice));
   const [size, setSize] = useState("500");
   const [submit, setSubmit] = useState<SubmitState>("idle");
+  const [placedLabel, setPlacedLabel] = useState("Resting on book");
+  const [serverError, setServerError] = useState<string | null>(null);
   const [touchedPrice, setTouchedPrice] = useState(false);
+  const [funding, setFunding] = useState(false);
 
   useEffect(() => {
     if (!touchedPrice) setPrice(String(yesPrice));
   }, [yesPrice, touchedPrice]);
 
   const locked = marketStatus !== "open";
+  const connected = !!wallet.address;
   const p = clampInt(price, 1, 99);
   const n = Math.max(0, Math.floor(Number(size) || 0));
   const costMicro = buyCostMicro(p, n);
   const payoutMicro = maxPayoutMicro(n);
-  const insufficient = side === "buy" && costMicro > balanceMicro;
+  const insufficient = side === "buy" && connected && costMicro > balanceMicro;
 
   const error = useMemo(() => {
     if (locked) return null;
+    if (serverError) return serverError;
+    if (!connected) return null; // the button becomes "Connect wallet"
     if (n <= 0) return "Enter a size to trade.";
     if (insufficient) return "Insufficient vault balance.";
     return null;
-  }, [locked, n, insufficient]);
+  }, [locked, connected, n, insufficient, serverError]);
 
-  const canSubmit = !locked && !error && submit === "idle";
+  const canSubmit = !locked && submit === "idle" && (!connected || !error);
 
-  function place() {
+  async function place() {
     if (!canSubmit) return;
+    if (!connected) {
+      wallet.connect();
+      return;
+    }
+    setServerError(null);
     setSubmit("signing");
-    window.setTimeout(() => setSubmit("placed"), 720);
-    window.setTimeout(() => setSubmit("idle"), 2600);
+
+    if (!api.live) {
+      // Fixture mode keeps the real flow's rhythm without a backend.
+      setPlacedLabel("Resting on book");
+      window.setTimeout(() => setSubmit("placed"), 720);
+      window.setTimeout(() => setSubmit("idle"), 2600);
+      return;
+    }
+
+    try {
+      const salt = randomSalt();
+      const msg = borshOrder({
+        maker: bs58.decode(wallet.address!),
+        marketId: fromHex(marketId),
+        outcome: 1, // this panel trades the YES ladder
+        side: side === "buy" ? 0 : 1,
+        price: p,
+        size: BigInt(n),
+        feeBps: 0,
+        expiry: 0n,
+        salt,
+      });
+      const sig = await wallet.signMessage(msg);
+      const res = await api.postOrder({
+        maker: wallet.address!,
+        market_id: marketId,
+        outcome: 1,
+        side: side === "buy" ? 0 : 1,
+        price: p,
+        size: n,
+        fee_bps: 0,
+        expiry: 0,
+        salt: Number(salt),
+        sig: toHex(sig),
+      });
+      setPlacedLabel(res.fills.length ? "Filled" : "Resting on book");
+      setSubmit("placed");
+      onPlaced?.();
+      window.setTimeout(() => setSubmit("idle"), 2600);
+    } catch (e) {
+      setSubmit("idle");
+      setServerError(placeErrorMessage(e, side));
+    }
+  }
+
+  async function fund() {
+    if (!wallet.address || funding) return;
+    setFunding(true);
+    try {
+      await api.deposit(wallet.address, 1_000_000_000); // 1,000 demo USDC
+      setServerError(null);
+      onPlaced?.();
+    } catch (e) {
+      setServerError(e instanceof Error ? e.message : "Deposit failed.");
+    } finally {
+      setFunding(false);
+    }
   }
 
   const maxShares = Math.floor(balanceMicro / (p * 10_000));
@@ -56,7 +133,9 @@ export function TradePanel({
     <div>
       <div className="mb-5 flex items-baseline justify-between">
         <h2 className="text-[13px] font-semibold text-ink">Trade</h2>
-        <span className="font-mono text-[11px] text-dim">YES · Brazil</span>
+        <span className="max-w-[170px] truncate font-mono text-[11px] text-dim">
+          YES · {marketTitle}
+        </span>
       </div>
 
       <div className="mb-6 grid grid-cols-2">
@@ -75,13 +154,22 @@ export function TradePanel({
           disabled={locked}
           onChange={(v) => {
             setTouchedPrice(true);
+            setServerError(null);
             setPrice(v);
           }}
         />
       </Field>
 
-      <Field label="Size" hint={`max ${maxShares.toLocaleString()}`}>
-        <NumInput value={size} unit="shares" disabled={locked} onChange={setSize} />
+      <Field label="Size" hint={connected ? `max ${maxShares.toLocaleString()}` : ""}>
+        <NumInput
+          value={size}
+          unit="shares"
+          disabled={locked}
+          onChange={(v) => {
+            setServerError(null);
+            setSize(v);
+          }}
+        />
       </Field>
 
       <dl className="mb-5 mt-6 space-y-2.5 font-mono text-[12.5px]">
@@ -106,6 +194,15 @@ export function TradePanel({
             role="alert"
           >
             {error}
+            {insufficient && api.live && (
+              <button
+                onClick={fund}
+                disabled={funding}
+                className="ml-2 text-accent underline underline-offset-2 hover:brightness-110"
+              >
+                {funding ? "Funding…" : "Fund 1,000 demo USDC"}
+              </button>
+            )}
           </motion.p>
         )}
       </AnimatePresence>
@@ -125,7 +222,7 @@ export function TradePanel({
             action — worth animating); blur masks the two-states overlap */}
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.span
-            key={locked ? "locked" : `${submit}-${submit === "idle" ? side : ""}`}
+            key={buttonKey(locked, connected, submit, side)}
             initial={{ opacity: 0, y: 5, filter: "blur(2px)" }}
             animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
             exit={{ opacity: 0, y: -5, filter: "blur(2px)", transition: { duration: 0.1 } }}
@@ -134,15 +231,7 @@ export function TradePanel({
           >
             {submit === "signing" && <Loader2 size={15} className="animate-spin" />}
             {submit === "placed" && <Check size={15} />}
-            {locked
-              ? "Trading closed"
-              : submit === "idle"
-                ? side === "buy"
-                  ? "Sign & Buy YES"
-                  : "Sign & Sell YES"
-                : submit === "signing"
-                  ? "Signing…"
-                  : "Resting on book"}
+            {buttonLabel(locked, connected, submit, side, placedLabel)}
           </motion.span>
         </AnimatePresence>
       </button>
@@ -150,10 +239,50 @@ export function TradePanel({
       <p className="mt-3 font-mono text-[11px] leading-relaxed text-dim">
         {locked
           ? "Market closed at kickoff."
-          : "Order signed in your wallet. Gasless — settled on-chain by the crank."}
+          : wallet.isDemo && connected
+            ? "Demo wallet (local key) — orders sign and settle on the real exchange."
+            : "Order signed in your wallet. Gasless — settled on-chain by the crank."}
       </p>
     </div>
   );
+}
+
+function buttonKey(locked: boolean, connected: boolean, submit: SubmitState, side: Side) {
+  if (locked) return "locked";
+  if (!connected) return "connect";
+  return `${submit}-${submit === "idle" ? side : ""}`;
+}
+
+function buttonLabel(
+  locked: boolean,
+  connected: boolean,
+  submit: SubmitState,
+  side: Side,
+  placedLabel: string
+) {
+  if (locked) return "Trading closed";
+  if (!connected) return "Connect wallet";
+  if (submit === "signing") return "Signing…";
+  if (submit === "placed") return placedLabel;
+  return side === "buy" ? "Sign & Buy YES" : "Sign & Sell YES";
+}
+
+function placeErrorMessage(e: unknown, side: Side): string {
+  if (e instanceof ApiError) {
+    switch (e.status) {
+      case 401:
+        return "Signature rejected — reconnect your wallet and retry.";
+      case 402:
+        return side === "buy"
+          ? "Insufficient vault balance."
+          : "Not enough YES shares to sell.";
+      case 409:
+        return "Duplicate order — try again.";
+      default:
+        return e.message || "Order rejected.";
+    }
+  }
+  return e instanceof Error ? e.message : "Order failed.";
 }
 
 function SideTab({

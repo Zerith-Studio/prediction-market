@@ -11,9 +11,11 @@ import { RecentFills } from "@/components/RecentFills";
 import { TradePanel } from "@/components/TradePanel";
 import { PitchTicker } from "@/components/PitchTicker";
 import { MarketSkeleton } from "@/components/Skeletons";
+import { usePitchWallet } from "@/lib/wallet";
 
 export default function MarketPage({ params }: { params: { id: string } }) {
-  const m = useLiveMarket(params.id);
+  const wallet = usePitchWallet();
+  const m = useLiveMarket(params.id, wallet.address);
   const up = m.priceDelta >= 0;
 
   return (
@@ -78,9 +80,12 @@ export default function MarketPage({ params }: { params: { id: string } }) {
               <div className="lg:rule-l lg:pl-10">
                 <div className="lg:sticky lg:top-[76px]">
                   <TradePanel
+                    marketId={params.id}
+                    marketTitle={m.market.title}
                     yesPrice={m.yesPrice}
                     balanceMicro={m.balanceMicro}
                     marketStatus={m.market.status}
+                    onPlaced={m.refreshBalance}
                   />
                 </div>
               </div>
