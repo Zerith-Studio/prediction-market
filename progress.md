@@ -149,11 +149,16 @@ keeps the real hash-based seeds.
 - [x] borsh conformance: TS↔Rust proven at runtime; Go↔Rust pinned by golden vectors
 - [x] crank builds the §6.5 3-instruction tx — TS reference proven on localnet; Go
       builder byte-verified in unit tests
-- [ ] **Go crank reworked to v0 tx + Address Lookup Table** (1453 B > 1232 legacy limit —
-      §2 finding; `tests/lifecycle.ts` is the reference)
-- [ ] program deploys to **devnet** at the pinned ID (blocked on keypair, decision #1)
-- [ ] one signed order → matched → **Go crank** settles on devnet
-- [ ] `resolve_market` → `redeem` on devnet → user's USDC moves
+- [x] **Go crank reworked to v0 tx + Address Lookup Table** — per-market cached LUT
+      (`crank/lut.go`); size proven in tests: legacy 1421 B ❌ vs v0 1116 B ✅ (limit 1232)
+- [ ] program deploys to **devnet** at the pinned ID — keypair committed (decision #1
+      CLOSED), `.so` built on a second machine (419,400 B, §4 reproduced); **blocked
+      only on devnet SOL** (faucet rate-limited; operator
+      `2rRndZBMURYnyZNY4b7Kvsmugn77dXchTmrzMub6A2fQ` needs ~3.5 SOL)
+- [ ] one signed order → matched → **Go crank** settles on devnet — harness ready:
+      `go run ./cmd/devnet-e2e` runs mock-USDC → market → vaults → engine fill →
+      v0 settle → assertions
+- [ ] `resolve_market` → `redeem` on devnet → user's USDC moves — same harness, final steps
 
 ---
 
@@ -161,7 +166,7 @@ keeps the real hash-based seeds.
 
 | # | Decision | Owner | Status |
 |---|---|---|---|
-| 1 | Commit `pitchmarket-keypair.json` or share out of band? | both | **open — now the deploy blocker** |
+| 1 | ~~Commit `pitchmarket-keypair.json` or share out of band?~~ | both | **CLOSED 2026-07-12: committed** (devnet-only key; `git add -f`, on `feat/devnet-settlement`) |
 | 2 | Oracle tier for demo: a (operator) vs d (TxODDS signed) | E1 | open, gated on TxODDS reply |
 | 3 | TxODDS signed-data email sent? | — | **still unknown — confirm** |
 | 4 | ~~Postgres vs in-memory~~ | E2 | CLOSED 2026-07-11: Postgres (Neon), wired + tested |
@@ -171,15 +176,18 @@ keeps the real hash-based seeds.
 
 ## 7. Next actions
 
-**E2:** (1) rework `crank.TxBuilder`/`RPCSubmitter` to v0 tx + ALT (port from
-`tests/lifecycle.ts`); (2) reproduce the §4 build on this machine; (3) **frontend** —
-now the biggest unstarted scope.
+**Immediate (anyone):** fund the operator wallet
+`2rRndZBMURYnyZNY4b7Kvsmugn77dXchTmrzMub6A2fQ` with ~5 devnet SOL
+(faucet.solana.com — CLI faucet is rate-limited). Then, on `feat/devnet-settlement`:
+`solana program deploy target/deploy/pitchmarket.so --program-id target/deploy/pitchmarket-keypair.json -u devnet`
+followed by `cd backend && go run ./cmd/devnet-e2e` — that closes the floor.
 
-**E1:** devnet deploy (resolve decision #1 first) → run the TS suite against devnet →
-`combo_accept` / `resolve_combo` → oracle tier d if TxODDS replies.
+**E2:** frontend — now the biggest unstarted scope.
 
-**Both:** keypair decision today; confirm the TxODDS email; then the joint milestone —
-**Go crank settles a real match on devnet.**
+**E1:** after deploy, run the TS suite against devnet → `combo_accept` /
+`resolve_combo` → oracle tier d if TxODDS replies.
+
+**Both:** confirm the TxODDS email (decision #3).
 
 ---
 
@@ -201,6 +209,7 @@ Newest first. One row per meaningful change. **Append here in the same commit as
 
 | Date | Who | What changed | Verified how |
 |---|---|---|---|
+| 2026-07-12 | Ashish | **Crank v0 + per-market ALT** (`crank/lut.go`, `BuildSettleMatchTxV0`); chain builders (initialize_market/init_vault/deposit/resolve/redeem) + `cmd/devnet-e2e` harness; committed program keypair (decision #1 closed); reproduced §4 fix on 2nd machine (Agave 4.1.1 → `.so` 419,400 B); pinned v0+ALT in interface-contract §6.5. **Devnet deploy blocked only on faucet SOL.** | `go test ./internal/crank` ✅ (v0 1116 B ≤ 1232, legacy 1421 B rejected; layout tests) · `cargo-build-sbf` ✅ on this machine · devnet run pending funds |
 | 2026-07-12 | Ashish | Merged PR #3 into main; reconciled this file across both tracks (E1 localnet results + E2 backend state + v0/ALT crank rework now tracked in §5/§7) | host `cargo test -p pitchmarket` ✅ · `go build`/`vet` + targeted Go suites ✅ on the merged tree |
 | 2026-07-13 | E1 | Added MERGE + cancel_order tests; refactored the TS harness into `tests/helpers.ts` (single borsh impl) | `npm test` **8/8 ✅** on `solana-test-validator` — all settle paths + cancel fail-closed |
 | 2026-07-12 | E1 | Fixed §4 build blocker (platform-tools v1.54); Boxed `SettleMatch` accounts (BPF stack overflow); added `idl-build` feature; added TS lifecycle test harness (`tests/`, `package.json`) | `cargo build-sbf` ✅ · `npm test` 5/5 ✅ on `solana-test-validator` (initialize→deposit→settle MINT+NORMAL→resolve→redeem, balances asserted) |
