@@ -2,6 +2,8 @@
 
 Audience: whoever picks this up next (E1 or E2). This is the "everything you need to
 continue" document. `progress.md` stays the live status board; this is the deeper tour.
+For the pre-demo adversarial test report + residual risks, see
+`docs/DEMO-READINESS.md`.
 
 ---
 
