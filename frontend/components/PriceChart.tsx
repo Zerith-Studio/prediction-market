@@ -1,19 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import type { PricePoint } from "@/lib/useLiveMarket";
 
 const W = 1000;
 const H = 260;
 const PAD_Y = 22;
 
-export function PriceChart({
-  data,
-  up,
-}: {
-  data: PricePoint[];
-  up: boolean;
-}) {
-  if (data.length < 2) return <div className="h-[260px]" />;
+export function PriceChart({ data, up }: { data: PricePoint[]; up: boolean }) {
+  const [hover, setHover] = useState<number | null>(null);
+  if (data.length < 2) return <div className="h-[190px] sm:h-[240px]" />;
 
   const prices = data.map((d) => d.price);
   let lo = Math.min(...prices);
@@ -24,26 +20,49 @@ export function PriceChart({
     hi = mid + 3;
   }
   const x = (i: number) => (i / (data.length - 1)) * W;
-  const y = (p: number) =>
-    H - PAD_Y - ((p - lo) / (hi - lo)) * (H - PAD_Y * 2);
+  const y = (p: number) => H - PAD_Y - ((p - lo) / (hi - lo)) * (H - PAD_Y * 2);
 
   const line = data.map((d, i) => `${x(i).toFixed(2)},${y(d.price).toFixed(2)}`).join(" ");
   const stroke = up ? "#34d399" : "#f2637e";
-  const last = data[data.length - 1];
-  const lx = x(data.length - 1);
-  const ly = y(last.price);
+  const last = data.length - 1;
   const baseY = y(data[0].price);
 
+  const active = hover ?? last;
+  const ax = x(active);
+  const ay = y(data[active].price);
+  const frac = active / (data.length - 1);
+  const minsAgo = Math.round((data[last].t - data[active].t) / 60000);
+
+  function onMove(e: React.MouseEvent<HTMLDivElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const f = (e.clientX - rect.left) / rect.width;
+    setHover(Math.max(0, Math.min(data.length - 1, Math.round(f * (data.length - 1)))));
+  }
+
   return (
-    <div className="relative w-full select-none">
+    <div
+      className="relative w-full select-none"
+      onMouseMove={onMove}
+      onMouseLeave={() => setHover(null)}
+    >
+      {/* hover readout */}
+      {hover !== null && (
+        <div
+          className="pointer-events-none absolute -top-1 z-10 -translate-x-1/2 whitespace-nowrap font-mono text-[11px] tnum"
+          style={{ left: `${frac * 100}%` }}
+        >
+          <span className="text-ink">{data[active].price}¢</span>
+          <span className="ml-2 text-dim">{minsAgo === 0 ? "now" : `−${minsAgo}m`}</span>
+        </div>
+      )}
+
       <svg
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
         className="h-[190px] w-full sm:h-[240px]"
         role="img"
-        aria-label={`YES price history, currently ${last.price} cents`}
+        aria-label={`YES price history, currently ${data[last].price} cents`}
       >
-        {/* reference baseline at the window's opening price */}
         <line
           x1="0"
           x2={W}
@@ -55,7 +74,6 @@ export function PriceChart({
           vectorEffect="non-scaling-stroke"
           opacity="0.5"
         />
-
         <polyline
           points={line}
           fill="none"
@@ -65,18 +83,25 @@ export function PriceChart({
           strokeLinecap="round"
           vectorEffect="non-scaling-stroke"
         />
-        {/* current marker */}
-        <circle cx={lx} cy={ly} r="8" fill={stroke} opacity="0.16" />
-        <circle
-          cx={lx}
-          cy={ly}
-          r="3"
-          fill={stroke}
-          vectorEffect="non-scaling-stroke"
-        />
+
+        {/* crosshair */}
+        {hover !== null && (
+          <line
+            x1={ax}
+            x2={ax}
+            y1="0"
+            y2={H}
+            stroke="#565b63"
+            strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
+            opacity="0.7"
+          />
+        )}
+
+        <circle cx={ax} cy={ay} r="8" fill={stroke} opacity="0.16" />
+        <circle cx={ax} cy={ay} r="3" fill={stroke} vectorEffect="non-scaling-stroke" />
       </svg>
 
-      {/* faint hi/lo guides */}
       <div className="pointer-events-none absolute right-0 top-0 font-mono text-[10px] text-dim tnum">
         {hi}¢
       </div>

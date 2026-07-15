@@ -1,102 +1,98 @@
 # Design
 
-Seed visual system for the PitchMarket frontend. Direction: **Broadcast / matchday** —
-a committed dark trading terminal with football-broadcast moments. Re-run
-`/impeccable document` once real tokens exist in code to capture the built system.
+Visual system for the PitchMarket frontend, as built in `frontend/`. Direction:
+**flat, sharp, box-less minimal** — a premium near-monochrome trading surface where
+structure comes from hairlines, whitespace, and typography, not cards.
+
+> This replaced an earlier "broadcast/matchday" panel-heavy direction (git history has it)
+> which read as templated. The rule now: **no boxes.** If you reach for a card, use a
+> hairline and space instead.
 
 ## Theme
 
-**Committed dark, single theme (no light mode).** Scene sentence that forces it: *a fan
-on the sofa at night, phone in hand, a World Cup match live on the TV in front of them* —
-matchday is an evening, big-screen, dark-room experience, and the order book / odds read
-best as light-on-dark. Light mode is not built; broadcast energy dies in it.
+**Committed dark, single theme (no light mode).** One flat near-black surface —
+no gradients, no textures, no panels. Depth and grouping are carried entirely by
+hairline rules (`border-line`) and generous vertical space.
 
-Color strategy: **Restrained + semantic.** Tinted-neutral surfaces carry the workbench;
-saturated color is reserved for *meaning* (YES/NO, live, verified), never decoration. This
-is what keeps us out of "crypto-degen neon" — the bright colors are a vocabulary, not a mood.
+Color strategy: **near-monochrome + one accent.** Off-white text on flat black, with a
+single emerald accent that only ever means *up / YES / positive / on-chain*. A quiet rose
+means *down / NO*, used sparingly. Everything else is greyscale. This restraint is the
+whole premium: bright color is a signal, never decoration.
 
 ## Color
 
-OKLCH values are the source of truth; hex is the fallback shipped in the mockup.
+Tokens (`tailwind.config.ts` → `theme.extend.colors`):
 
 | Role | Token | Hex | Use |
 |---|---|---|---|
-| Base bg | `--bg` | `#07090d` | app background (near-black, faintly cool) |
-| Surface | `--panel` | `#11161f` | panels, cards, book |
-| Surface 2 | `--panel-2` | `#141b26` | nav, toolbars, insets (cooler second layer) |
-| Hairline | `--line` | `#1e2735` | borders, dividers |
-| Ink | `--txt` | `#eef2f8` | primary text (≥4.5:1 on all surfaces) |
-| Muted | `--muted` | `#8b98ad` | secondary text — verified AA, not lighter |
-| Dim | `--dim` | `#5c6a7e` | tertiary / meta labels only (large/non-body) |
-| **YES** | `--yes` | `#22e08a` | buy/yes/bid/up — **always paired with a "YES" label + position, never color alone** |
-| **NO** | `--no` | `#ff4d6a` | sell/no/ask/down — same rule |
-| Live / AI | `--accent` | `#ffd21e` | live tag, match clock, one-liner AI voice |
-| **Verified** | `--verify` | `#00e0ff` | on-chain / settled / "Verified on Solana" ONLY — this cyan is a trust semantic, never a decorative accent |
+| Base | `bg` | `#0a0a0b` | the single flat surface — no elevated panels |
+| Ink | `ink` | `#f4f5f7` | primary text |
+| Muted | `muted` | `#9297a0` | secondary text (AA) |
+| Dim | `dim` | `#565b63` | labels, eyebrows, tertiary, chart guides |
+| Hairline | `line` | `#1b1c20` | separators — the primary structural device |
+| Hairline+ | `line2` | `#292b30` | input underlines, stronger dividers |
+| **Accent** | `accent` | `#34d399` | up / YES / bid / positive / on-chain / primary action — the ONE accent |
+| **Down** | `down` | `#f2637e` | down / NO / ask — used sparingly |
 
-Semantic states (standardize across every interactive element): hover, focus-visible,
-active, disabled, selected, loading, error, warning, success. Accent/verify colors are
-full-saturation only on active states; inactive states desaturate toward the neutral ramp.
-
-**Bans honored:** no gradient text, no glassmorphism beyond the single sticky nav blur, no
-side-stripe borders, no gradients-on-black hero. Depth comes from the hairline + surface
-layering, not glow.
+Radius is **0** by default (sharp); `sm` = 1px, `md` = 2px exist but are rarely used.
+No shadows, no glow (except the chart marker's faint halo). Bans honored: no gradient
+text, no glassmorphism (the only blur is the sticky nav), no side-stripe borders, no cards.
 
 ## Typography
 
-One workhorse sans + one monospace. No display/body pairing (product register).
+Inter (sans) + JetBrains Mono. **One idea: numbers and system chrome are mono; prose is
+sans.**
 
-- **Sans:** Inter (or system-ui fallback). Headings, labels, buttons, body. Weights 500/700/800.
-- **Mono:** JetBrains Mono / SF Mono / ui-monospace. **All numerics** — prices, sizes,
-  balances, odds, order hashes, tx sigs, clocks. One monospace treatment everywhere numbers
-  appear (Principle 5: money-UI honesty).
-- **Scale:** fixed rem, ratio ~1.2. No fluid clamp() in the app UI (product register). The
-  match-hero scoreline is the one permitted oversized element (~40px), a broadcast moment.
-- Letter-spacing ≥ -0.02em on the few large elements; prose capped 65–75ch; tables may run denser.
+- **Display price** — big and *thin* (`font-light`, ~46–64px mono). Weight, not size, reads
+  premium here. The current YES price is the page's typographic anchor.
+- **Headings** — sans, `font-semibold`, 13–15px. Small and quiet; the data is the hero.
+- **Eyebrows** (`.eyebrow`) — mono, 10.5px, uppercase, `tracking-[0.18em]`, `dim`. Used for
+  column headers and section tags where a terminal earns them — not on every section.
+- **All numerics** — mono + `.tnum` (tabular). Prices, sizes, balances, hashes, clocks.
+- Fixed rem scale (no fluid clamp in app UI); prose capped ~65–75ch.
 
 ## Motion
 
-Motion conveys **state**, not decoration (product register: 150–250ms on most transitions).
-Broadcast energy is a strict four-moment budget:
+State, not decoration; 150–300ms ease-out. Reserved moments:
 
-1. **Live pulse** — the LIVE dot on the match hero (2s loop). Ambient, low-cost.
-2. **Fill flash** — an order-book row flashes YES/NO tint for ~0.9s when a fill lands, then
-   settles. This is the single most important animation; it makes the book feel alive.
-3. **Odds tick** — the YES/NO odds meter animates width + a ▲/▼ delta when price moves.
-4. **Settlement seal** — the "Verified on Solana" card reveals with a cyan glow-in on resolve.
+1. **Live pulse** — the LIVE dot (rose, 1.8s loop).
+2. **Trade flash** — a book row / trade briefly tints accent/down when it lands, then decays.
+3. **Price chart** — updates as trades stream; **hover shows a crosshair + price/time readout**.
+4. **AI ticker** — one-liner crossfades (`AnimatePresence initial={false}`, so it never
+   ships blank — content is never gated on the animation).
 
-Everything else (nav, panels, forms, tabs) uses plain 150–250ms ease-out (quart/expo, no
-bounce). Library: Framer Motion. **Every one of the four moments has a
-`prefers-reduced-motion` fallback** (crossfade or instant; content is never gated on the
-animation). No orchestrated page-load sequence — the app loads into a task.
+Library: Framer Motion. Full `prefers-reduced-motion` fallbacks (globals zeroes durations).
+No page-load choreography.
 
-## Components
+## Components (`frontend/components/`)
 
-Base: **shadcn/ui + Tailwind**, restyled to these tokens (don't ship default shadcn slate).
-Every interactive component ships all states: default, hover, focus-visible, active,
-disabled, loading (skeleton, not center-spinner), error.
+Box-less by construction — sections are separated by `rule-t` / `rule-b` / `rule-l`.
 
-Signature components (the ones worth crafting first):
-- **MatchHero** — live tag, crests in national colors, scoreline, clock. Anchors every market page.
-- **OrderBook** — depth-shaded rows (YES bid / NO ask), spread marker, fill-flash. The pro layer.
-- **OddsMeter** — the green/red YES-NO split bar; the instant read above the book.
-- **TradePanel** — buy/sell tabs, limit price + size, cost/payout, "Sign & Buy" with the
-  "gasless · settled by crank" trust line.
-- **VerifySeal** — the settlement "Verified on Solana ↗" card. First-class, not a footnote.
-- **PitchTicker** — the Claude one-liner ticker (amber AI voice).
+- **PriceChart** — SVG line chart of the YES token value; dashed baseline at the window's
+  open, hi/lo guides, live marker, hover crosshair. `preserveAspectRatio="none"` +
+  `vector-effect="non-scaling-stroke"` keeps strokes crisp at any width.
+- **MatchHero** — airy match line: team names + score, national-color **dots** (not crests).
+- **OrderBook** — box-less rows, subtle depth tint (accent/down at ~7% opacity), MID/SPREAD rule.
+- **RecentFills** — minimal trades list.
+- **TradePanel** — underline inputs (border-bottom only), segmented Buy/Sell via underline,
+  one sharp solid accent button. Full state coverage (error, disabled, loading, locked).
+- **VerifySeal / settlement** — the "Verified on Solana ↗" trust moment; first-class, real
+  devnet explorer links.
+- **PitchTicker**, **TopBar** (mono wordmark, text nav), **Skeletons** (box-less bars).
 
-Empty states teach (an unopened book explains how signed orders rest); they never say
-"nothing here." Modals are a last resort — prefer inline/progressive (product register).
+States: skeleton loading (bars, no spinners), empty states that teach, `focus-visible`
+accent outline on every interactive element.
 
 ## Layout
 
-Responsive is structural, not fluid type: the market page is a two-column
-book + trade-panel grid on desktop that stacks on mobile; nav collapses; tables become
-scroll containers. Format landing uses `repeat(auto-fit, minmax(280px,1fr))`. Semantic
-z-index scale (dropdown → sticky nav → modal-backdrop → modal → toast → tooltip).
+`max-w-[1200px]`, generous `px`. Structural responsiveness (not fluid type):
+market page is `lg:grid-cols-[1fr_300px]` (book+trades | sticky trade panel, split by a
+vertical hairline) collapsing to a single column; hero/score grid uses `min-w-0` + truncate
+so nothing overflows (verified at true 390px). Semantic z-index scale.
 
 ## Stack
 
 Next.js 14 (App Router) on Vercel · Privy embedded wallet (ed25519 order signing, encoder
-lifted from `tests/helpers.ts`) · Tailwind + shadcn/ui · Framer Motion · typed `apiClient`
-+ single `useSocket` hook against the Go REST/WS surface. Requires CORS added to the Go
-REST mux for the Vercel/localhost origin.
+lifted from `tests/helpers.ts`) · Tailwind · Framer Motion · lucide icons · typed
+`apiClient` + `useLiveMarket` hook against the Go REST/WS surface. Fixture-driven until
+`NEXT_PUBLIC_API_URL` is set (backend REST mux then needs CORS for the origin).

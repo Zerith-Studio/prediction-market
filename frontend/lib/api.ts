@@ -1,4 +1,4 @@
-import type { Book, Fill, Market, Match } from "./types";
+import type { Book, Fill, Market, Match, Portfolio, Settlement } from "./types";
 import {
   DEMO_MARKET_ID,
   demoBalanceMicro,
@@ -7,7 +7,14 @@ import {
   demoMarket,
   demoMatch,
   demoOneliners,
+  demoPortfolio,
+  demoSettlement,
 } from "./fixtures";
+
+export const explorerTx = (sig: string) =>
+  `https://explorer.solana.com/tx/${sig}?cluster=devnet`;
+export const explorerAddr = (addr: string) =>
+  `https://explorer.solana.com/address/${addr}?cluster=devnet`;
 
 // Typed client for the Go REST surface. When NEXT_PUBLIC_API_URL is set it hits
 // the real backend; otherwise it serves the demo fixtures so the UI renders with
@@ -72,5 +79,13 @@ export const api = {
 
   async getBalance(_wallet: string): Promise<number> {
     return get(`/balance`, () => demoBalanceMicro);
+  },
+
+  async getSettlement(id: string): Promise<Settlement> {
+    return get(`/markets/${id}/settlement`, () => demoSettlement);
+  },
+
+  async getPortfolio(_wallet: string): Promise<Portfolio> {
+    return get(`/portfolio`, () => demoPortfolio);
   },
 };

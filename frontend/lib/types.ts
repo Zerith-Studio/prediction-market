@@ -58,3 +58,60 @@ export interface Fill {
 }
 
 export type Side = "buy" | "sell";
+
+export interface SettleStep {
+  label: string;
+  detail: string;
+  tx: string | null; // devnet signature, or null for off-chain steps
+}
+
+export interface Settlement {
+  market_id: string;
+  title: string;
+  scoreline: string; // "Brazil 2 – 0 Argentina"
+  status: MarketStatus;
+  winner: "YES" | "NO";
+  resolved_by: string; // "TxODDS signed outcome (tier-a)"
+  program_id: string;
+  deploy_tx: string;
+  your_shares: number;
+  your_payout_micro: number;
+  timeline: SettleStep[];
+}
+
+export interface Position {
+  market_id: string;
+  title: string;
+  yes: number;
+  no: number;
+  avg_cost: number; // cents
+  current: number; // cents, current YES price
+}
+
+export interface OpenOrder {
+  order_hash: string;
+  title: string;
+  outcome: "YES" | "NO";
+  side: Side;
+  price: number;
+  size: number;
+  remaining: number;
+  status: string;
+}
+
+export interface HistoryFill {
+  title: string;
+  side: Side;
+  outcome: "YES" | "NO";
+  price: number;
+  size: number;
+  ts: number;
+  tx: string;
+}
+
+export interface Portfolio {
+  balance_micro: number;
+  positions: Position[];
+  orders: OpenOrder[];
+  history: HistoryFill[];
+}
