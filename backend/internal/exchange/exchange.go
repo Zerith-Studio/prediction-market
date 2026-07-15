@@ -116,9 +116,13 @@ func (e *Exchange) SubmitOrder(ctx context.Context, o *models.Order) ([32]byte, 
 	for _, f := range fills {
 		id, err := e.store.ApplyFill(ctx, f)
 		if err != nil {
-			// Mirror diverged from the engine — loud log; the chain remains the
-			// source of truth and the index will reconcile.
-			e.log.Error("exchange: ApplyFill failed — mirror divergent", "err", err)
+			// Mirror rejected the fill (e.g. the index synced this order down to
+			// chain truth after a late-landing settle). Unwind the engine's
+			// optimistic decrement so memory and DB stay consistent — the fill
+			// simply never happened.
+			e.log.Error("exchange: ApplyFill rejected — unwinding engine fill", "err", err)
+			book.Unfill(f.Taker.Hash, f.Size)
+			book.Unfill(f.Maker.Hash, f.Size)
 			continue
 		}
 		fillIDs = append(fillIDs, id)

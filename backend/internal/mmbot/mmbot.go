@@ -116,7 +116,10 @@ func (b *Bot) Requote(ctx context.Context, marketID [32]byte, fair uint16) error
 			Side:     models.SideBuy,
 			Price:    uint16(q.price),
 			Size:     b.QuoteSize,
-			Salt:     b.rng.Uint64(),
+			// Quotes age out: a crashed/restarted bot's stale orders leave the
+			// book by themselves instead of resting forever.
+			Expiry: time.Now().Add(10 * time.Minute).Unix(),
+			Salt:   b.rng.Uint64(),
 		}
 		models.SignOrder(o, b.priv)
 		hash, _, err := b.ex.SubmitOrder(ctx, o)
