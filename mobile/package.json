@@ -10,6 +10,7 @@
     "@privy-io/expo-native-extensions": "^0.0.12",
     "@types/jest": "29.5.14",
     "bs58": "^6.0.0",
+    "buffer": "^6.0.3",
     "expo": "~57.0.6",
     "expo-apple-authentication": "~57.0.1",
     "expo-application": "~57.0.1",
