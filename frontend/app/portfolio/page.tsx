@@ -112,6 +112,14 @@ export default function PortfolioPage() {
   const totalValue = positions.reduce((a, x) => a + x.valueMicro, 0);
   const totalUnrealized = positions.reduce((a, x) => a + x.unrealizedMicro, 0);
   const totalRealized = pf?.positions.reduce((a, p) => a + p.realized, 0) ?? 0;
+  const totalPnl = totalUnrealized + totalRealized;
+  const noActivity =
+    !!pf &&
+    positions.length === 0 &&
+    pf.orders.length === 0 &&
+    pf.precision.length === 0 &&
+    pf.combos.length === 0 &&
+    pf.history.length === 0;
 
   return (
     <div className="min-h-screen">
@@ -135,20 +143,42 @@ export default function PortfolioPage() {
 
         {wallet.address && pf && (
           <>
-            {/* summary */}
-            <section className="grid grid-cols-2 gap-8 py-10 sm:grid-cols-4">
-              <Stat label="Vault" value={usd(pf.balance_micro)} />
-              <Stat label="Position value · BBP" value={usd(totalValue)} />
-              <Stat
-                label="Unrealised P&L"
-                value={`${totalUnrealized >= 0 ? "+" : "−"}${usd(Math.abs(totalUnrealized))}`}
-                tone={totalUnrealized >= 0 ? "up" : "down"}
-              />
-              <Stat
-                label="Realised P&L"
-                value={`${totalRealized >= 0 ? "+" : "−"}${usd(Math.abs(totalRealized))}`}
-                tone={totalRealized >= 0 ? "up" : "down"}
-              />
+            {/* summary — two focal numbers: vault + total P&L, each with a muted breakdown */}
+            <section className="rule-b py-10 sm:py-12">
+              <div className="grid gap-8 sm:grid-cols-2">
+                <div>
+                  <p className="eyebrow mb-3">Vault</p>
+                  <p className="font-mono text-[38px] font-light leading-none text-ink tnum sm:text-[48px]">
+                    {usd(pf.balance_micro)}
+                  </p>
+                  <p className="mt-3 font-mono text-[11.5px] text-dim">
+                    + {usd(totalValue)} in positions · BBP
+                  </p>
+                </div>
+                <div className="sm:text-right">
+                  <p className="eyebrow mb-3">Total P&amp;L</p>
+                  <p
+                    className={`font-mono text-[38px] font-light leading-none tnum sm:text-[48px] ${
+                      totalPnl > 0 ? "text-accent" : totalPnl < 0 ? "text-down" : "text-ink"
+                    }`}
+                  >
+                    {totalPnl >= 0 ? "+" : "−"}
+                    {usd(Math.abs(totalPnl))}
+                  </p>
+                  <p className="mt-3 font-mono text-[11.5px] text-dim">
+                    unrealised{" "}
+                    <span className={totalUnrealized < 0 ? "text-down" : "text-muted"}>
+                      {totalUnrealized >= 0 ? "+" : "−"}
+                      {usd(Math.abs(totalUnrealized))}
+                    </span>{" "}
+                    · realised{" "}
+                    <span className={totalRealized < 0 ? "text-down" : "text-muted"}>
+                      {totalRealized >= 0 ? "+" : "−"}
+                      {usd(Math.abs(totalRealized))}
+                    </span>
+                  </p>
+                </div>
+              </div>
             </section>
 
             {error && (
@@ -158,12 +188,9 @@ export default function PortfolioPage() {
             )}
 
             {/* positions */}
-            <Section title="Positions">
-              {positions.length === 0 ? (
-                <Empty>No open positions. Fills land here, marked at the best bid.</Empty>
-              ) : (
-                <>
-                  <Grid cols="grid-cols-[1fr_auto_auto] sm:grid-cols-[1fr_repeat(5,minmax(72px,auto))]">
+            {positions.length > 0 && (
+              <Section title="Positions" count={positions.length}>
+                <Grid cols="grid-cols-[1fr_auto_auto] sm:grid-cols-[1fr_repeat(5,minmax(72px,auto))]">
                     <Head>Market</Head>
                     <Head className="hidden text-right sm:block">Size</Head>
                     <Head className="hidden text-right sm:block">Avg → BBP</Head>
@@ -213,16 +240,13 @@ export default function PortfolioPage() {
                       </div>
                     </Grid>
                   ))}
-                </>
-              )}
-            </Section>
+              </Section>
+            )}
 
             {/* open orders */}
-            <Section title="Open orders">
-              {pf.orders.length === 0 ? (
-                <Empty>No resting orders. Signed limit orders show up here.</Empty>
-              ) : (
-                pf.orders.map((o) => {
+            {pf.orders.length > 0 && (
+              <Section title="Open orders" count={pf.orders.length}>
+                {pf.orders.map((o) => {
                   const filled = o.size - o.remaining;
                   return (
                     <div
@@ -260,16 +284,14 @@ export default function PortfolioPage() {
                       </div>
                     </div>
                   );
-                })
-              )}
-            </Section>
+                })}
+              </Section>
+            )}
 
             {/* precision pools */}
-            <Section title="Precision pools">
-              {pf.precision.length === 0 ? (
-                <Empty>Pool entries land here — your guess, stake, and result.</Empty>
-              ) : (
-                pf.precision.map((p) => {
+            {pf.precision.length > 0 && (
+              <Section title="Precision pools" count={pf.precision.length}>
+                {pf.precision.map((p) => {
                   const settled = p.status === "settled" || p.status === "void";
                   const payout = p.payout_micro ?? 0;
                   const pnl = settled ? payout - p.stake_micro : 0;
@@ -309,16 +331,14 @@ export default function PortfolioPage() {
                       </div>
                     </div>
                   );
-                })
-              )}
-            </Section>
+                })}
+              </Section>
+            )}
 
             {/* combos */}
-            <Section title="Combos">
-              {pf.combos.length === 0 ? (
-                <Empty>Accepted combos land here with their result.</Empty>
-              ) : (
-                pf.combos.map((c) => {
+            {pf.combos.length > 0 && (
+              <Section title="Combos" count={pf.combos.length}>
+                {pf.combos.map((c) => {
                   const pnl =
                     c.status === "won"
                       ? c.payout_micro - c.stake_micro
@@ -329,18 +349,33 @@ export default function PortfolioPage() {
                   return (
                     <div
                       key={c.quote_hash}
-                      className="flex items-center justify-between border-b border-line py-3.5 last:border-b-0"
+                      className="flex items-start justify-between gap-4 border-b border-line py-4 last:border-b-0"
                     >
-                      <div className="min-w-0">
-                        <p className="truncate text-[13.5px] text-ink">
-                          {c.legs}-leg combo{" "}
-                          {c.status === "won" ? (
-                            <span className="text-dim">· pays {usd(c.payout_micro)}</span>
-                          ) : null}
-                        </p>
-                        <p className="font-mono text-[11px] text-dim">
-                          stake {usd(c.stake_micro)} · {shortHash(c.quote_hash, 6, 4)}
-                        </p>
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                          <span className="text-[13px] font-medium text-ink">
+                            {c.legs}-leg combo
+                          </span>
+                          <span className="font-mono text-[11px] text-dim tnum">
+                            stake {usd(c.stake_micro)} → pays {usd(c.payout_micro)} ·{" "}
+                            {shortHash(c.quote_hash, 4, 4)}
+                          </span>
+                        </div>
+                        <ul className="space-y-1">
+                          {c.legDetails.map((l, i) => (
+                            <li
+                              key={i}
+                              className="flex items-baseline gap-2 font-mono text-[11.5px]"
+                            >
+                              <span
+                                className={`w-7 shrink-0 ${l.outcome === 1 ? "text-accent" : "text-down"}`}
+                              >
+                                {l.outcome === 1 ? "YES" : "NO"}
+                              </span>
+                              <span className="min-w-0 truncate text-muted">{l.title}</span>
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                       <div className="flex items-center gap-4 text-right font-mono text-[12px] tnum">
                         <div>
@@ -366,16 +401,14 @@ export default function PortfolioPage() {
                       </div>
                     </div>
                   );
-                })
-              )}
-            </Section>
+                })}
+              </Section>
+            )}
 
-            {/* history */}
-            <Section title="History">
-              {pf.history.length === 0 ? (
-                <Empty>Settled fills land here with their devnet transaction.</Empty>
-              ) : (
-                pf.history.map((h, i) => (
+            {/* history — demoted to a secondary, muted section (reference) */}
+            {pf.history.length > 0 && (
+              <Section title="History" count={pf.history.length} secondary>
+                {pf.history.map((h, i) => (
                   <div
                     key={i}
                     className="flex items-center justify-between border-b border-line py-3.5 last:border-b-0"
@@ -392,9 +425,19 @@ export default function PortfolioPage() {
                       <span className="font-mono text-[11px] text-dim">settling…</span>
                     )}
                   </div>
-                ))
-              )}
-            </Section>
+                ))}
+              </Section>
+            )}
+
+            {noActivity && (
+              <div className="rule-t py-20 text-center">
+                <p className="text-[14px] text-muted">Nothing here yet.</p>
+                <p className="mt-2 text-[13px] leading-relaxed text-dim">
+                  Fund your wallet and place a trade — positions, pools, combos, and
+                  history will show up here.
+                </p>
+              </div>
+            )}
 
             <div className="py-10" />
           </>
@@ -404,25 +447,23 @@ export default function PortfolioPage() {
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "up" | "down" }) {
-  return (
-    <div>
-      <p className="mb-2 eyebrow">{label}</p>
-      <p
-        className={`font-mono text-[20px] font-light tnum sm:text-[24px] ${
-          tone === "up" ? "text-accent" : tone === "down" ? "text-down" : "text-ink"
-        }`}
-      >
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  count,
+  secondary,
+  children,
+}: {
+  title: string;
+  count?: number;
+  secondary?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <section className="rule-t py-8">
-      <h2 className="mb-5 text-[13px] font-semibold text-ink">{title}</h2>
+      <h2 className="mb-5 flex items-baseline gap-2">
+        <span className={secondary ? "eyebrow" : "text-[13px] font-semibold text-ink"}>{title}</span>
+        {count ? <span className="font-mono text-[11px] text-dim tnum">{count}</span> : null}
+      </h2>
       {children}
     </section>
   );
@@ -446,8 +487,4 @@ function Head({ children, className = "" }: { children: React.ReactNode; classNa
 
 function Num({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <span className={`font-mono text-[12.5px] text-muted tnum ${className}`}>{children}</span>;
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="py-6 text-[13px] text-muted">{children}</p>;
 }
