@@ -31,6 +31,7 @@
 import {
   createContext, useCallback, useContext, useEffect, useMemo, useState,
 } from "react";
+import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
@@ -113,6 +114,25 @@ function PrivyBridge({ children }: { children: React.ReactNode }) {
   return <WalletCtx.Provider value={value}>{children}</WalletCtx.Provider>;
 }
 
+// expo-secure-store has no web implementation — its methods are undefined on
+// web and crash at mount. The web preview (expo start → w / expo export
+// --platform web) falls back to localStorage, mirroring the web app's demo
+// wallet; native keeps SecureStore.
+const seedStore = {
+  get: async (): Promise<string | null> =>
+    Platform.OS === "web"
+      ? globalThis.localStorage?.getItem(SEED_KEY) ?? null
+      : SecureStore.getItemAsync(SEED_KEY),
+  set: async (hex: string): Promise<void> => {
+    if (Platform.OS === "web") globalThis.localStorage?.setItem(SEED_KEY, hex);
+    else await SecureStore.setItemAsync(SEED_KEY, hex);
+  },
+  del: async (): Promise<void> => {
+    if (Platform.OS === "web") globalThis.localStorage?.removeItem(SEED_KEY);
+    else await SecureStore.deleteItemAsync(SEED_KEY);
+  },
+};
+
 function DemoWalletProvider({ children }: { children: React.ReactNode }) {
   const [keys, setKeys] = useState<nacl.SignKeyPair | null>(null);
   const [ready, setReady] = useState(false);
@@ -120,25 +140,25 @@ function DemoWalletProvider({ children }: { children: React.ReactNode }) {
   // Restore a previous session's wallet; creation is explicit via connect().
   useEffect(() => {
     (async () => {
-      const existing = await SecureStore.getItemAsync(SEED_KEY);
+      const existing = await seedStore.get();
       if (existing && existing.length === 64) setKeys(keypairFromSeed(fromHex(existing)));
       setReady(true);
     })();
   }, []);
 
   const connect = useCallback(async () => {
-    let hex = await SecureStore.getItemAsync(SEED_KEY);
+    let hex = await seedStore.get();
     if (!hex || hex.length !== 64) {
       const seed = new Uint8Array(32);
       crypto.getRandomValues(seed);
       hex = toHex(seed);
-      await SecureStore.setItemAsync(SEED_KEY, hex);
+      await seedStore.set(hex);
     }
     setKeys(keypairFromSeed(fromHex(hex)));
   }, []);
 
   const disconnect = useCallback(async () => {
-    await SecureStore.deleteItemAsync(SEED_KEY);
+    await seedStore.del();
     setKeys(null);
   }, []);
 
