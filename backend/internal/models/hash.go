@@ -94,3 +94,10 @@ func BuyCost(price uint16, size uint64, feeBps uint16) uint64 {
 // MicroPerCent converts price-in-cents × shares into micro-USDC
 // (mirrors MICRO_PER_CENT in programs/pitchmarket/src/lib.rs).
 const MicroPerCent uint64 = 10_000
+
+// MaxOrderSize caps order size to keep every money computation (price·size·
+// MicroPerCent + fee) well within uint64 — no legitimate order is anywhere
+// near this (shares are whole USDC-redeemable units). Without the cap, a
+// crafted size wraps BuyCost near zero and locks ~nothing for a colossal
+// order. 1e12 shares × 99¢ × fee stays under 2^64 with room to spare.
+const MaxOrderSize uint64 = 1_000_000_000_000

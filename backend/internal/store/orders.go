@@ -29,6 +29,9 @@ type OrderRow struct {
 // E2-entry enforcement of interface-contract.md §1; the chain re-checks on
 // settle regardless.
 func (s *Store) PlaceOrder(ctx context.Context, o *models.Order) error {
+	if o.Size == 0 || o.Size > models.MaxOrderSize {
+		return ErrBadOrderSize
+	}
 	hash := models.OrderHash(o)
 	wallet := models.PubkeyString(o.Maker)
 

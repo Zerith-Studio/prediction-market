@@ -110,7 +110,7 @@ type Gemini struct {
 
 func NewGemini(apiKey, model string) *Gemini {
 	if model == "" {
-		model = "gemini-3.0-flash"
+		model = "gemini-3.5-flash" // gemini-3.0-flash does not exist (404s)
 	}
 	return &Gemini{APIKey: apiKey, Model: model, Client: &http.Client{Timeout: 30 * time.Second}}
 }

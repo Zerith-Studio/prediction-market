@@ -102,6 +102,7 @@ func (c *ChainOps) EnsureSettleATAs(ctx context.Context, marketID [32]byte, take
 		return m.NoMint
 	}
 	var ixs []solana.Instruction
+	var created []solana.PublicKey // addresses we're creating this call
 	for _, side := range []struct {
 		maker   [32]byte
 		outcome uint8
@@ -111,12 +112,13 @@ func (c *ChainOps) EnsureSettleATAs(ctx context.Context, marketID [32]byte, take
 			return err
 		}
 		for _, mint := range []solana.PublicKey{c.Builder.USDCMint, mintFor(side.outcome)} {
-			ix, err := c.ensureATAIx(ctx, vault, mint)
+			ix, addr, err := c.ensureATAIx(ctx, vault, mint)
 			if err != nil {
 				return err
 			}
 			if ix != nil {
 				ixs = append(ixs, ix)
+				created = append(created, addr)
 			}
 		}
 	}
@@ -126,37 +128,73 @@ func (c *ChainOps) EnsureSettleATAs(ctx context.Context, marketID [32]byte, take
 	if _, err := c.sendOperator(ctx, ixs); err != nil {
 		return fmt.Errorf("crank: create vault ATAs: %w", err)
 	}
+	// Close the read-after-write gap: the settle that follows simulates on a
+	// possibly-different RPC node, so wait until each freshly-created ATA is
+	// actually readable before returning (else settle_match reverts with
+	// AccountNotInitialized). Only now do we cache them as existing.
+	for _, addr := range created {
+		if err := c.waitAccountVisible(ctx, addr); err != nil {
+			return fmt.Errorf("crank: ATA %s not visible after create: %w", addr, err)
+		}
+		c.mu.Lock()
+		c.atas[c.ataKey(addr)] = true
+		c.mu.Unlock()
+	}
 	return nil
 }
 
-func (c *ChainOps) ensureATAIx(ctx context.Context, owner, mint solana.PublicKey) (solana.Instruction, error) {
-	key := owner.String() + ":" + mint.String()
+// ataKey mirrors the cache key used in ensureATAIx (keyed by the derived ATA
+// address, which is unique per (owner, mint)).
+func (c *ChainOps) ataKey(ata solana.PublicKey) string { return ata.String() }
+
+// waitAccountVisible polls until the account is readable or a short deadline
+// passes (accounts propagate within a slot or two on devnet).
+func (c *ChainOps) waitAccountVisible(ctx context.Context, addr solana.PublicKey) error {
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if info, err := c.Client.GetAccountInfo(ctx, addr); err == nil && info != nil && info.Value != nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("not visible in time")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(1500 * time.Millisecond):
+		}
+	}
+}
+
+// ensureATAIx returns a CreateIdempotent instruction for the (owner, mint) ATA
+// if it isn't known to exist, plus the derived address. Cache is keyed by the
+// ATA address and only set when existence is VERIFIED (here on a positive
+// read, or by EnsureSettleATAs after the create confirms) — never optimistically
+// on the create path, which would poison the cache if the create failed/lagged
+// and revert every later settle with AccountNotInitialized.
+func (c *ChainOps) ensureATAIx(ctx context.Context, owner, mint solana.PublicKey) (solana.Instruction, solana.PublicKey, error) {
+	addr, _, err := solana.FindAssociatedTokenAddress(owner, mint)
+	if err != nil {
+		return nil, solana.PublicKey{}, err
+	}
+	key := addr.String()
 	c.mu.Lock()
 	known := c.atas[key]
 	c.mu.Unlock()
 	if known {
-		return nil, nil
-	}
-	addr, _, err := solana.FindAssociatedTokenAddress(owner, mint)
-	if err != nil {
-		return nil, err
+		return nil, addr, nil
 	}
 	if info, err := c.Client.GetAccountInfo(ctx, addr); err == nil && info != nil && info.Value != nil {
 		c.mu.Lock()
 		c.atas[key] = true
 		c.mu.Unlock()
-		return nil, nil
+		return nil, addr, nil
 	}
-	// CreateIdempotent: a no-op when the ATA already exists, so a transient
-	// RPC error on the existence check can never turn into a failed settle.
-	c.mu.Lock()
-	c.atas[key] = true
-	c.mu.Unlock()
 	create := ata.NewCreateIdempotentInstructionBuilder().
 		SetPayer(c.Operator.PublicKey()).
 		SetWallet(owner).
 		SetMint(mint)
-	return create.Build(), nil
+	return create.Build(), addr, nil
 }
 
 // DepositWithKey performs the full deposit for a wallet whose key the server
@@ -211,7 +249,7 @@ func (c *ChainOps) PrepareDeposit(ctx context.Context, user solana.PublicKey, am
 	if bal, err := c.Client.GetBalance(ctx, user, rpc.CommitmentConfirmed); err == nil && bal.Value < 30_000_000 {
 		ixs = append(ixs, system.NewTransferInstruction(30_000_000, c.Operator.PublicKey(), user).Build())
 	}
-	if ix, err := c.ensureATAIx(ctx, user, c.Builder.USDCMint); err == nil && ix != nil {
+	if ix, _, err := c.ensureATAIx(ctx, user, c.Builder.USDCMint); err == nil && ix != nil {
 		ixs = append(ixs, ix)
 	}
 	ixs = append(ixs, token.NewMintToInstruction(amountMicro, c.Builder.USDCMint, userATA,

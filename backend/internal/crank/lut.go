@@ -62,11 +62,24 @@ func (m *LUTManager) EnsureTable(ctx context.Context, f matching.Fill) (solana.P
 		return addr, want, nil
 	}
 
-	// Table exists: fetch its current contents and extend with anything missing
-	// (e.g. a wallet trading this market for the first time).
+	// Table exists (per our cache): fetch its current contents and extend with
+	// anything missing (e.g. a wallet trading this market for the first time).
 	state, err := lookup.GetAddressLookupTable(ctx, m.client, tableAddr)
 	if err != nil {
-		return solana.PublicKey{}, nil, fmt.Errorf("crank: fetch lookup table %s: %w", tableAddr, err)
+		// The cached table is unreadable — a dropped create, RPC lag, or a
+		// stale entry from a crashed run. Evict and recreate so the market
+		// self-heals instead of reverting every settle forever.
+		m.mu.Lock()
+		delete(m.tables, f.MarketID)
+		m.mu.Unlock()
+		addr, cerr := m.createTable(ctx, want)
+		if cerr != nil {
+			return solana.PublicKey{}, nil, fmt.Errorf("crank: recreate lookup table (prior %s unreadable: %v): %w", tableAddr, err, cerr)
+		}
+		m.mu.Lock()
+		m.tables[f.MarketID] = addr
+		m.mu.Unlock()
+		return addr, want, nil
 	}
 	have := make(map[solana.PublicKey]bool, len(state.Addresses))
 	for _, a := range state.Addresses {

@@ -23,6 +23,7 @@ var (
 	ErrAlreadyEntered     = errors.New("store: one precision entry per wallet per pool")
 	ErrQuoteNotOpen       = errors.New("store: combo quote is not open")
 	ErrMarketNotOpen      = errors.New("store: market is not open")
+	ErrBadOrderSize       = errors.New("store: order size out of range")
 )
 
 type Store struct {
