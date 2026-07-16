@@ -18,3 +18,24 @@ export function b64ToBytes(b64: string): Uint8Array {
   }
   return out;
 }
+
+/** Encode bytes to standard base64 (with padding). */
+export function bytesToB64(bytes: Uint8Array): string {
+  let out = "";
+  let i = 0;
+  for (; i + 2 < bytes.length; i += 3) {
+    const [a, b, c] = [bytes[i], bytes[i + 1], bytes[i + 2]];
+    out += ALPHABET[a >> 2] + ALPHABET[((a & 3) << 4) | (b >> 4)] +
+      ALPHABET[((b & 15) << 2) | (c >> 6)] + ALPHABET[c & 63];
+  }
+  const rem = bytes.length - i;
+  if (rem === 1) {
+    const a = bytes[i];
+    out += ALPHABET[a >> 2] + ALPHABET[(a & 3) << 4] + "==";
+  } else if (rem === 2) {
+    const a = bytes[i];
+    const b = bytes[i + 1];
+    out += ALPHABET[a >> 2] + ALPHABET[((a & 3) << 4) | (b >> 4)] + ALPHABET[(b & 15) << 2] + "=";
+  }
+  return out;
+}

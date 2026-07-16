@@ -8,9 +8,12 @@
     "scheme": "pitchmarket",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.pitchmarket.app",
+      "supportsTablet": false
     },
     "android": {
+      "package": "com.pitchmarket.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -33,7 +36,14 @@
           "imageWidth": 76
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "expo-build-properties",
+        {
+          "ios": { "deploymentTarget": "17.5" }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
