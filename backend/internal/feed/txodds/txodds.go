@@ -564,6 +564,60 @@ func (p *Provider) broadcast(fixtureID string, ev feed.MatchEvent) {
 	}
 }
 
+// --- reconciliation snapshot -------------------------------------------------
+
+// Result is a fixture's folded final state from the score snapshot.
+type Result struct {
+	Home, Away     int
+	HTHome, HTAway int
+	TotalPasses    *int // nil — txodds passes stat isn't mapped yet (admin can supply)
+}
+
+// FinalState folds the fixture's score snapshot into a final result and reports
+// whether the feed considers the match finished (GameState finished / final
+// whistle). Unlike the live SSE stream, the snapshot is authoritative and
+// queryable at any time — this is what lets the resolution reconciler recover a
+// full-time event that was missed while the service was down or the stream
+// dropped.
+func (p *Provider) FinalState(ctx context.Context, fixtureID string) (Result, bool, error) {
+	var frames []wireScore
+	if err := p.get(ctx, "/api/scores/snapshot/"+fixtureID, &frames); err != nil {
+		return Result{}, false, err
+	}
+	st := &scoreState{}
+	finished := false
+	for _, s := range frames {
+		if st.homeID == 0 && (s.Participant1ID != 0 || s.Participant2ID != 0) {
+			if s.Participant1H {
+				st.homeID, st.awayID = s.Participant1ID, s.Participant2ID
+			} else {
+				st.homeID, st.awayID = s.Participant2ID, s.Participant1ID
+			}
+		}
+		switch strings.ToLower(s.Action) {
+		case "goal":
+			if pid := participantOf(s.Data); pid != 0 {
+				if pid == st.awayID {
+					st.away++
+				} else {
+					st.home++
+				}
+			}
+		case "halftime_finalised", "period_end":
+			if st.htHome == 0 && st.htAway == 0 {
+				st.htHome, st.htAway = st.home, st.away
+			}
+		case "final_whistle":
+			finished = true
+		}
+		applyStats(st, s.Stats)
+		if gameStateFinished(s.GameState) {
+			finished = true
+		}
+	}
+	return Result{Home: st.home, Away: st.away, HTHome: st.htHome, HTAway: st.htAway}, finished, nil
+}
+
 func truncate(b []byte) string {
 	if len(b) > 200 {
 		return string(b[:200]) + "…"

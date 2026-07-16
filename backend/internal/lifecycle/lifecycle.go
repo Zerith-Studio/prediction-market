@@ -192,6 +192,12 @@ func (s *Service) ResolveFixture(ctx context.Context, fixtureID string, final Fi
 	}
 	for _, t := range templates.Registry {
 		marketID := templates.MarketID(fixtureID, t.Key)
+		// Idempotent: skip markets already resolved so the reconciler can re-run
+		// safely (and finish a partially-resolved match) without re-hitting chain.
+		if cur, err := s.store.GetMarket(ctx, marketID); err == nil &&
+			(cur.Status == "settled" || cur.Status == "void") {
+			continue
+		}
 		switch t.Type {
 		case "binary":
 			result, ok := binaryOutcome(t.Key, final)
