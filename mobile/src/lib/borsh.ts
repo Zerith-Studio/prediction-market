@@ -45,7 +45,16 @@ export function randomSalt(): bigint {
   const b = new Uint8Array(8);
   crypto.getRandomValues(b);
   // Clear the top bit: the backend stores salts in a signed BIGINT column.
-  b[7] &= 0x7f;
+  // Also clear the top 11 bits (not just 1): api.postOrder's wire DTO carries
+  // salt as a JSON number, round-tripped through a JS `number` (Number(bigint)
+  // in the caller). A 63-bit random value is >2^53 (Number.MAX_SAFE_INTEGER)
+  // ~99.9% of the time, so Number(salt) silently rounds to a different
+  // integer than what was signed — the backend then reconstructs a different
+  // Order for signature verification and every order 401s. Found by
+  // scripts/e2e-flow.ts against a live backend (task 12). Keeping the salt
+  // under 2^53 makes the bigint -> Number -> JSON -> uint64 round-trip exact.
+  b[7] = 0;
+  b[6] &= 0x1f;
   return new DataView(b.buffer).getBigUint64(0, true);
 }
 

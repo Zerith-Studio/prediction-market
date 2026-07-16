@@ -25,6 +25,17 @@ test("randomSalt clears the top bit (signed BIGINT column)", () => {
   for (let i = 0; i < 32; i++) expect(randomSalt() < 2n ** 63n).toBe(true);
 });
 
+test("randomSalt survives the bigint -> Number -> JSON -> uint64 round-trip", () => {
+  // api.postOrder's wire DTO sends salt as a JSON number (Number(salt) at the
+  // call site), so any salt >= 2^53 (Number.MAX_SAFE_INTEGER) silently rounds
+  // to a different integer than what was signed, and the backend's signature
+  // check fails against the reconstructed Order. Caught by scripts/e2e-flow.ts.
+  for (let i = 0; i < 64; i++) {
+    const salt = randomSalt();
+    expect(BigInt(Number(salt))).toBe(salt);
+  }
+});
+
 test("b64ToBytes decodes standard base64", () => {
   expect(Array.from(b64ToBytes("AQIDBA=="))).toEqual([1, 2, 3, 4]);
   expect(Array.from(b64ToBytes("aGVsbG8="))).toEqual([104, 101, 108, 108, 111]);
