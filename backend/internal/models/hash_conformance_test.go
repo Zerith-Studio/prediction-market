@@ -71,6 +71,41 @@ func TestSignAndVerifyOrder(t *testing.T) {
 	}
 }
 
+// goldenQuote must stay byte-identical to the frontend borshComboQuote encoder
+// (frontend/lib/borsh.ts) — pinned by scripts/check-borsh.mjs. A silent drift
+// here fails closed as BadSignature with no useful error.
+func goldenQuote() *ComboQuote {
+	q := &ComboQuote{
+		Legs:   []Leg{{Outcome: OutcomeYes}, {Outcome: OutcomeNo}},
+		Stake:  5_000_000,
+		Payout: 20_000_000,
+		Expiry: 1_700_000_000,
+		Salt:   0xDEADBEEF,
+	}
+	for i := 0; i < 32; i++ {
+		q.Maker[i] = byte(i + 1)
+		q.Legs[0].MarketID[i] = byte(i + 33)
+		q.Legs[1].MarketID[i] = byte(i + 65)
+	}
+	return q
+}
+
+const goldenQuoteBorshHex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20" +
+	"02000000" +
+	"2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f4001" +
+	"4142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f6000" +
+	"404b4c0000000000" +
+	"002d310100000000" +
+	"00f1536500000000" +
+	"efbeadde00000000"
+
+func TestBorshComboQuoteGoldenVector(t *testing.T) {
+	got := hex.EncodeToString(BorshComboQuote(goldenQuote()))
+	if got != goldenQuoteBorshHex {
+		t.Errorf("borsh(ComboQuote) drifted from the pinned golden vector\n got: %s\nwant: %s", got, goldenQuoteBorshHex)
+	}
+}
+
 func TestSignAndVerifyQuote(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {

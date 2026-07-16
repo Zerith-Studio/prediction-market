@@ -398,6 +398,42 @@ func (s *Server) handleAdminCancelOrders(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+type adminPriceDTO struct {
+	Price uint16 `json:"price"` // YES fair price, cents 1..99
+}
+
+// handleAdminSetPrice pushes a manual fair price to the MM bot for a binary
+// market: the bot then quotes it two-sided (seeding liquidity to trade against)
+// and can answer combo RFQs that include this market. Handy when TxLINE isn't
+// pricing a fixture (manually-created markets, or a fixture not yet live).
+func (s *Server) handleAdminSetPrice(w http.ResponseWriter, r *http.Request) {
+	if s.pricer == nil {
+		httpError(w, http.StatusServiceUnavailable, "MM bot not running — cannot set price")
+		return
+	}
+	m, ok := s.marketFromPath(w, r)
+	if !ok {
+		return
+	}
+	if m.Type != "binary" {
+		httpError(w, http.StatusBadRequest, "fair price applies to binary markets only")
+		return
+	}
+	var d adminPriceDTO
+	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+		httpError(w, http.StatusBadRequest, "bad payload: "+err.Error())
+		return
+	}
+	if d.Price < 1 || d.Price > 99 {
+		httpError(w, http.StatusBadRequest, "price must be 1..99 cents")
+		return
+	}
+	s.pricer.OnFairPrice(m.MarketID, d.Price)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"market_id": models.HashString(m.MarketID), "price": d.Price,
+	})
+}
+
 // handleAdminResolveFixture fires the full cascade from a final score: every
 // binary market resolves on-chain, precision pools settle, combos sweep.
 func (s *Server) handleAdminResolveFixture(w http.ResponseWriter, r *http.Request) {

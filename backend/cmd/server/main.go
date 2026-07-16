@@ -233,6 +233,7 @@ func run(log *slog.Logger) error {
 				WithChain(chainOps).
 				WithFixtures(fixtureSrc).
 				WithAdmin(adminPubkey).
+				WithPricer(priceSink).
 				Routes(),
 			os.Getenv("CORS_ORIGIN")),
 	}

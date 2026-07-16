@@ -126,6 +126,7 @@ export interface ComboResult {
   quote_hash: string;
   status: "accepted" | "won" | "lost" | "void";
   legs: number;
+  legDetails: { title: string; outcome: number }[]; // the actual legs
   stake_micro: number;
   payout_micro: number;
   resolve_tx?: string;

@@ -203,6 +203,26 @@ export interface RFQ {
   status: string;
 }
 
+export interface OpenRFQLeg {
+  market_id: string;
+  outcome: number; // 0 = NO, 1 = YES
+  title: string;
+}
+export interface OpenRFQ {
+  id: string;
+  taker: string;
+  stake: number; // micro-USDC the taker staked
+  legs: OpenRFQLeg[];
+  created_at: string;
+}
+interface WireOpenRFQ {
+  id: string;
+  taker: string;
+  stake: number;
+  legs: { market_id: string; outcome: number }[];
+  created_at: string;
+}
+
 // ---- client -----------------------------------------------------------------
 
 export const api = {
@@ -357,6 +377,7 @@ export const api = {
               quote_hash: string;
               status: "accepted" | "won" | "lost" | "void";
               legs: number;
+              leg_details?: { market_id: string; outcome: number }[];
               stake: number;
               payout: number;
               resolve_tx?: string;
@@ -411,6 +432,10 @@ export const api = {
         quote_hash: c.quote_hash,
         status: c.status,
         legs: c.legs,
+        legDetails: (c.leg_details ?? []).map((l) => ({
+          outcome: l.outcome,
+          title: titles.get(l.market_id) ?? shortId(l.market_id),
+        })),
         stake_micro: c.stake,
         payout_micro: c.payout,
         resolve_tx: c.resolve_tx,
@@ -508,6 +533,44 @@ export const api = {
       quote_hash: quoteHash,
       taker,
     });
+  },
+
+  // Market-maker view: open RFQs awaiting a quote (titles joined client-side).
+  async listOpenRFQs(): Promise<OpenRFQ[]> {
+    const titles = new Map<string, string>();
+    try {
+      for (const m of await this.listMarkets()) titles.set(m.market_id, m.title);
+    } catch {
+      /* still renders with ids */
+    }
+    const r = await get<{ rfqs: WireOpenRFQ[] | null }>(`/combos`);
+    return (r.rfqs ?? []).map((rq) => ({
+      id: rq.id,
+      taker: rq.taker,
+      stake: rq.stake,
+      created_at: rq.created_at,
+      legs: (rq.legs ?? []).map((l) => ({
+        market_id: l.market_id,
+        outcome: l.outcome,
+        title: titles.get(l.market_id) ?? shortId(l.market_id),
+      })),
+    }));
+  },
+
+  // Submit a signed ComboQuote as a market maker (sig over borshComboQuote).
+  async submitQuote(
+    rfqId: string,
+    q: {
+      maker: string;
+      legs: { market_id: string; outcome: number }[];
+      stake: number;
+      payout: number;
+      expiry: number;
+      salt: number;
+      sig: string;
+    },
+  ): Promise<{ quote_hash: string }> {
+    return post(`/combos/${rfqId}/quotes`, q);
   },
 };
 

@@ -61,3 +61,48 @@ export function fromHex(hex: string): Uint8Array {
   for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   return out;
 }
+
+// ComboQuote signing (market-maker flow). Byte-for-byte mirror of
+// models.BorshComboQuote (backend/internal/models/hash.go): maker[32], u32 LE
+// leg count, then each leg (marketId[32] + outcome u8), then stake/payout/
+// expiry/salt as u64 LE. The MM signs over THESE bytes (not the hash), exactly
+// like an order signs over borshOrder.
+export interface QuoteLeg {
+  marketId: Uint8Array; // 32
+  outcome: number; // 0 = NO, 1 = YES
+}
+
+export interface QuoteMsg {
+  maker: Uint8Array; // 32
+  legs: QuoteLeg[];
+  stake: bigint;
+  payout: bigint;
+  expiry: bigint; // unix seconds (0 = GTC)
+  salt: bigint;
+}
+
+export function borshComboQuote(q: QuoteMsg): Uint8Array {
+  if (q.maker.length !== 32) throw new Error("borshComboQuote: maker must be 32 bytes");
+  const buf = new Uint8Array(32 + 4 + q.legs.length * 33 + 8 * 4);
+  const dv = new DataView(buf.buffer);
+  let o = 0;
+  buf.set(q.maker, o);
+  o += 32;
+  dv.setUint32(o, q.legs.length, true);
+  o += 4;
+  for (const leg of q.legs) {
+    if (leg.marketId.length !== 32) throw new Error("borshComboQuote: marketId must be 32 bytes");
+    buf.set(leg.marketId, o);
+    o += 32;
+    buf[o] = leg.outcome & 0xff;
+    o += 1;
+  }
+  dv.setBigUint64(o, q.stake, true);
+  o += 8;
+  dv.setBigUint64(o, q.payout, true);
+  o += 8;
+  dv.setBigUint64(o, q.expiry, true);
+  o += 8;
+  dv.setBigUint64(o, q.salt, true);
+  return buf;
+}
