@@ -185,6 +185,10 @@ func run(log *slog.Logger) error {
 	}
 
 	// --- feed: TxLINE (real) or replay (recorded)
+	// fixtureSrc, when set, exposes the live feed's on-demand reads (fixtures +
+	// odds snapshot) to the admin panel. It stays a nil interface in replay /
+	// off-chain mode, which disables the admin fixture browser.
+	var fixtureSrc api.FixtureSource
 	switch feedMode(operator) {
 	case "txodds":
 		provider, err := txodds.New(
@@ -195,6 +199,7 @@ func run(log *slog.Logger) error {
 		if err != nil {
 			return errors.New("txodds provider: " + err.Error())
 		}
+		fixtureSrc = provider
 		comp, _ := strconv.Atoi(envOr("TXODDS_COMPETITION", "72"))
 		go discoverFixtures(ctx, provider, lc, bot, comp, log)
 		log.Info("feed: TxLINE live", "competition", comp)
@@ -207,10 +212,26 @@ func run(log *slog.Logger) error {
 		}
 	}
 
+	// Admin panel: gated by an operator-wallet signature. ADMIN_PUBKEY names the
+	// wallet allowed to administer (base58); default to the operator's own pubkey
+	// so on-chain deployments have a working admin out of the box. Empty → /admin
+	// stays disabled (503).
+	adminPubkey := os.Getenv("ADMIN_PUBKEY")
+	if adminPubkey == "" && operator != nil {
+		adminPubkey = operator.PublicKey().String()
+	}
+	if adminPubkey != "" {
+		log.Info("admin panel enabled", "admin_pubkey", adminPubkey, "fixtures", fixtureSrc != nil)
+	}
+
 	srv := &http.Server{
 		Addr: envOr("PITCHMARKET_ADDR", ":8080"),
 		Handler: api.WithCORS(
-			api.New(ex, st, hub, rfqSvc, lc, log).WithChain(chainOps).Routes(),
+			api.New(ex, st, hub, rfqSvc, lc, log).
+				WithChain(chainOps).
+				WithFixtures(fixtureSrc).
+				WithAdmin(adminPubkey).
+				Routes(),
 			os.Getenv("CORS_ORIGIN")),
 	}
 	go func() {

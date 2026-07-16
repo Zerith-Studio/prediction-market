@@ -128,6 +128,43 @@ funds lost), both fixed or documented:
 
    Or simplest for a fresh demo: point the server at a clean database.
 
+## Admin panel — manual market control (`/admin`)
+
+The auto full-time cascade only fires when the TxLINE score feed reports the
+final whistle, which can lag hours (§residual risks). The `/admin` page is the
+mitigation and the demo's safety net: it lets the operator drive the lifecycle
+by hand — settle on cue rather than on the feed.
+
+**Enable it.** Set `ADMIN_PUBKEY` to the base58 pubkey of the wallet you sign
+with *in the browser* (your Privy or local demo wallet — **not** a server
+keypair). In on-chain mode it defaults to the operator pubkey; blank + no
+operator ⇒ `/admin` returns 503.
+
+**Sign in.** Open `/admin` (not linked from the nav — reach it by URL), connect
+the admin wallet, click *Sign in as admin*. The wallet signs a one-time
+challenge (`pitchmarket-admin:<nonce>`); the server checks the ed25519 signature
+against `ADMIN_PUBKEY` and issues an 8-hour session token (in-memory, held in
+`localStorage`). No password, nothing on the wire but the signature.
+
+**What it does.**
+- **Fixtures & odds** — browse the live TxLINE fixtures (competition filter,
+  default 72), peek at implied ¢ per template, and **create a fixture's markets**
+  on demand (the same `RegisterFixture` the feed uses; on-chain when enabled).
+- **Markets** — per-market **Resolve** (binary YES/NO/VOID; precision settle to a
+  value or void), **Close**, and **Clear orders** (off-chain cancel of every
+  resting order — the clean-slate button that used to need raw SQL, see the stale
+  mirror-order note above).
+- **Resolve fixture from score** — enter the final score once to fire the whole
+  cascade (every binary resolves on-chain, precision settles, combos sweep) —
+  how you demo "Verified on Solana" without waiting on the whistle.
+- **Ops** — operator SOL (low-balance warning), TxLINE credential validity, and
+  market status tallies.
+
+Every resolve goes through the same on-chain `resolve_market` + store mirror as
+the automatic path, so money safety is unchanged. Auth is demo-grade (session
+tokens live in memory); production auth is out of scope. Covered by
+`internal/api/admin_test.go` (auth round-trip + single-market resolve).
+
 ## Run the suite yourself
 
 ```sh

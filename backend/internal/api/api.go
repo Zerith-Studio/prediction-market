@@ -5,6 +5,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/Zerith-Studio/prediction-market/backend/internal/crank"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/exchange"
+	"github.com/Zerith-Studio/prediction-market/backend/internal/feed/txodds"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/lifecycle"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/matching"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/models"
@@ -23,6 +25,14 @@ import (
 	"github.com/Zerith-Studio/prediction-market/backend/internal/ws"
 )
 
+// FixtureSource exposes the TxLINE feed's on-demand reads to the admin panel
+// (fixture discovery + odds snapshot). *txodds.Provider implements it; nil in
+// replay / off-chain mode disables the admin fixture browser.
+type FixtureSource interface {
+	Fixtures(ctx context.Context, competitionID int) ([]txodds.Fixture, error)
+	OddsSnapshot(ctx context.Context, fixtureID string) (map[string]uint16, error)
+}
+
 type Server struct {
 	ex        *exchange.Exchange
 	store     *store.Store
@@ -30,6 +40,8 @@ type Server struct {
 	rfq       *rfq.Service
 	lifecycle *lifecycle.Service
 	chain     *crank.ChainOps // nil = off-chain mirror mode
+	fixtures  FixtureSource   // nil = admin fixture browser disabled
+	admin     *adminAuth      // operator-wallet gate for /admin (nil until WithAdmin)
 	log       *slog.Logger
 }
 
@@ -41,6 +53,19 @@ func New(ex *exchange.Exchange, st *store.Store, hub *ws.Hub, rfqSvc *rfq.Servic
 // WithChain enables the real on-chain deposit flow.
 func (s *Server) WithChain(c *crank.ChainOps) *Server {
 	s.chain = c
+	return s
+}
+
+// WithFixtures wires the live feed's on-demand reads into the admin panel.
+func (s *Server) WithFixtures(src FixtureSource) *Server {
+	s.fixtures = src
+	return s
+}
+
+// WithAdmin enables the /admin surface, gated by operator-wallet signatures from
+// adminPubkeyB58 (base58). An empty pubkey leaves /admin returning 503.
+func (s *Server) WithAdmin(adminPubkeyB58 string) *Server {
+	s.admin = newAdminAuth(adminPubkeyB58)
 	return s
 }
 
@@ -59,7 +84,7 @@ func WithCORS(next http.Handler, origin string) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", allow)
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Admin-Session")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -100,6 +125,19 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /wallet/deposit-complete", s.handleDepositComplete)
 	mux.HandleFunc("GET /balance", s.handleBalance)
 	mux.HandleFunc("GET /portfolio", s.handlePortfolio)
+
+	// Admin — operator-gated manual market control (auth in admin.go)
+	mux.HandleFunc("GET /admin/challenge", s.handleAdminChallenge)
+	mux.HandleFunc("POST /admin/session", s.handleAdminSession)
+	mux.HandleFunc("GET /admin/fixtures", s.adminGuard(s.handleAdminFixtures))
+	mux.HandleFunc("GET /admin/fixtures/{id}/odds", s.adminGuard(s.handleAdminFixtureOdds))
+	mux.HandleFunc("POST /admin/fixtures/{id}/markets", s.adminGuard(s.handleAdminCreateMarkets))
+	mux.HandleFunc("POST /admin/fixtures/{id}/resolve", s.adminGuard(s.handleAdminResolveFixture))
+	mux.HandleFunc("GET /admin/markets", s.adminGuard(s.handleAdminMarkets))
+	mux.HandleFunc("POST /admin/markets/{id}/resolve", s.adminGuard(s.handleAdminResolveMarket))
+	mux.HandleFunc("POST /admin/markets/{id}/close", s.adminGuard(s.handleAdminCloseMarket))
+	mux.HandleFunc("POST /admin/markets/{id}/cancel-orders", s.adminGuard(s.handleAdminCancelOrders))
+	mux.HandleFunc("GET /admin/ops", s.adminGuard(s.handleAdminOps))
 
 	// Ops
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
