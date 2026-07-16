@@ -786,8 +786,30 @@ func (s *Server) handlePortfolio(w http.ResponseWriter, r *http.Request) {
 		escOut[i] = map[string]any{
 			"quote_hash": models.HashString(e.QuoteHash),
 			"taker":      e.Taker, "status": e.Status,
+			"stake": e.Stake, "payout": e.Payout, "legs": e.Legs,
 			"accept_tx": e.AcceptTx, "resolve_tx": e.ResolveTx,
 		}
+	}
+
+	precEntries, err := s.store.PrecisionEntriesForWallet(ctx, wallet)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	precOut := make([]map[string]any, len(precEntries))
+	for i, p := range precEntries {
+		row := map[string]any{
+			"market_id": models.HashString(p.MarketID),
+			"title":     p.Title, "status": p.Status,
+			"guess": p.Guess, "stake": p.Stake, "ts": p.TS,
+		}
+		if p.Score != nil {
+			row["score"] = *p.Score
+		}
+		if p.Payout != nil {
+			row["payout"] = *p.Payout
+		}
+		precOut[i] = row
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -796,6 +818,7 @@ func (s *Server) handlePortfolio(w http.ResponseWriter, r *http.Request) {
 		"orders":    ordOut,
 		"fills":     fills,
 		"combos":    escOut,
+		"precision": precOut,
 	})
 }
 

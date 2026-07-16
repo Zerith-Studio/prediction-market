@@ -185,6 +185,51 @@ func (s *Store) SettlePrecision(ctx context.Context, marketID [32]byte, actual, 
 	return sum, err
 }
 
+// PrecisionPortfolioRow is a wallet's stake in one pool, joined with the pool's
+// title + status (and, once settled, score + payout) for the portfolio view.
+type PrecisionPortfolioRow struct {
+	MarketID [32]byte
+	Title    string
+	Status   string
+	Guess    float64
+	Stake    uint64
+	Score    *float64
+	Payout   *uint64
+	TS       time.Time
+}
+
+// PrecisionEntriesForWallet lists every precision pool the wallet has entered,
+// newest first, with the pool's title/status and settlement result when present.
+func (s *Store) PrecisionEntriesForWallet(ctx context.Context, wallet string) ([]PrecisionPortfolioRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT e.market_id, m.title, m.status, e.guess, e.stake, e.score, e.payout, e.ts
+		FROM precision_entries e JOIN markets m ON m.market_id = e.market_id
+		WHERE e."user" = $1
+		ORDER BY e.ts DESC`, wallet)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PrecisionPortfolioRow
+	for rows.Next() {
+		var (
+			r        PrecisionPortfolioRow
+			marketID []byte
+			payout   *int64
+		)
+		if err := rows.Scan(&marketID, &r.Title, &r.Status, &r.Guess, &r.Stake, &r.Score, &payout, &r.TS); err != nil {
+			return nil, err
+		}
+		copy(r.MarketID[:], marketID)
+		if payout != nil {
+			p := uint64(*payout)
+			r.Payout = &p
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // VoidPrecision refunds every stake (abandoned match → pool VOID, ADR 0006).
 func (s *Store) VoidPrecision(ctx context.Context, marketID [32]byte) error {
 	return s.tx(ctx, func(tx pgx.Tx) error {

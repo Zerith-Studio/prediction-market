@@ -112,9 +112,30 @@ export interface HistoryFill {
   tx: string;
 }
 
+export interface PrecisionResult {
+  market_id: string;
+  title: string;
+  status: MarketStatus;
+  guess: number;
+  stake_micro: number;
+  score?: number; // 0..1, present once settled
+  payout_micro?: number; // present once settled/won
+}
+
+export interface ComboResult {
+  quote_hash: string;
+  status: "accepted" | "won" | "lost" | "void";
+  legs: number;
+  stake_micro: number;
+  payout_micro: number;
+  resolve_tx?: string;
+}
+
 export interface Portfolio {
   balance_micro: number;
   positions: Position[];
   orders: OpenOrder[];
   history: HistoryFill[];
+  precision: PrecisionResult[];
+  combos: ComboResult[];
 }

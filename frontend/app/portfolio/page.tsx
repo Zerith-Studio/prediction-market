@@ -264,6 +264,112 @@ export default function PortfolioPage() {
               )}
             </Section>
 
+            {/* precision pools */}
+            <Section title="Precision pools">
+              {pf.precision.length === 0 ? (
+                <Empty>Pool entries land here — your guess, stake, and result.</Empty>
+              ) : (
+                pf.precision.map((p) => {
+                  const settled = p.status === "settled" || p.status === "void";
+                  const payout = p.payout_micro ?? 0;
+                  const pnl = settled ? payout - p.stake_micro : 0;
+                  return (
+                    <div
+                      key={p.market_id}
+                      className="flex items-center justify-between border-b border-line py-3.5 last:border-b-0"
+                    >
+                      <div className="min-w-0">
+                        <Link
+                          href={`/precision/${p.market_id}`}
+                          className="block truncate text-[13.5px] text-ink hover:text-accent"
+                        >
+                          {p.title}
+                        </Link>
+                        <p className="font-mono text-[11px] text-dim">
+                          guess {p.guess} · stake {usd(p.stake_micro)}
+                          {p.score != null && <> · score {p.score.toFixed(2)}</>}
+                        </p>
+                      </div>
+                      <div className="text-right font-mono text-[12px] tnum">
+                        {settled ? (
+                          <>
+                            <div className={pnl >= 0 ? "text-accent" : "text-down"}>
+                              {pnl >= 0 ? "+" : "−"}
+                              {usd(Math.abs(pnl))}
+                            </div>
+                            <div className="text-dim">
+                              {p.status === "void" ? "void · refunded" : `paid ${usd(payout)}`}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="uppercase text-dim">
+                            {p.status === "closed" ? "locked" : "open"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </Section>
+
+            {/* combos */}
+            <Section title="Combos">
+              {pf.combos.length === 0 ? (
+                <Empty>Accepted combos land here with their result.</Empty>
+              ) : (
+                pf.combos.map((c) => {
+                  const pnl =
+                    c.status === "won"
+                      ? c.payout_micro - c.stake_micro
+                      : c.status === "lost"
+                        ? -c.stake_micro
+                        : 0;
+                  const done = c.status === "won" || c.status === "lost";
+                  return (
+                    <div
+                      key={c.quote_hash}
+                      className="flex items-center justify-between border-b border-line py-3.5 last:border-b-0"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-[13.5px] text-ink">
+                          {c.legs}-leg combo{" "}
+                          {c.status === "won" ? (
+                            <span className="text-dim">· pays {usd(c.payout_micro)}</span>
+                          ) : null}
+                        </p>
+                        <p className="font-mono text-[11px] text-dim">
+                          stake {usd(c.stake_micro)} · {shortHash(c.quote_hash, 6, 4)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-4 text-right font-mono text-[12px] tnum">
+                        <div>
+                          <div
+                            className={`uppercase ${
+                              c.status === "won"
+                                ? "text-accent"
+                                : c.status === "lost"
+                                  ? "text-down"
+                                  : "text-dim"
+                            }`}
+                          >
+                            {c.status === "accepted" ? "pending" : c.status}
+                          </div>
+                          {done && (
+                            <div className={pnl >= 0 ? "text-accent" : "text-down"}>
+                              {pnl >= 0 ? "+" : "−"}
+                              {usd(Math.abs(pnl))}
+                            </div>
+                          )}
+                        </div>
+                        {c.resolve_tx && <VerifyLink href={explorerTx(c.resolve_tx)}>tx</VerifyLink>}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </Section>
+
             {/* history */}
             <Section title="History">
               {pf.history.length === 0 ? (

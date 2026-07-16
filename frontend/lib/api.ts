@@ -296,7 +296,15 @@ export const api = {
   },
 
   async getPortfolio(wallet: string | null): Promise<Portfolio> {
-    if (!wallet) return { balance_micro: 0, positions: [], orders: [], history: [] };
+    if (!wallet)
+      return {
+        balance_micro: 0,
+        positions: [],
+        orders: [],
+        history: [],
+        precision: [],
+        combos: [],
+      };
     // Titles come from the markets list — one extra call, joined client-side.
     const titles = new Map<string, string>();
     try {
@@ -333,6 +341,27 @@ export const api = {
             }[]
           | null;
         fills: WireFill[] | null;
+        precision:
+          | {
+              market_id: string;
+              title: string;
+              status: Market["status"];
+              guess: number;
+              stake: number;
+              score?: number;
+              payout?: number;
+            }[]
+          | null;
+        combos:
+          | {
+              quote_hash: string;
+              status: "accepted" | "won" | "lost" | "void";
+              legs: number;
+              stake: number;
+              payout: number;
+              resolve_tx?: string;
+            }[]
+          | null;
       }
     >(`/portfolio?wallet=${encodeURIComponent(wallet)}`, (w) => ({
       balance_micro: w.balance?.usdc_available ?? 0,
@@ -368,6 +397,23 @@ export const api = {
         size: f.size,
         ts: Date.parse(f.ts) || Date.now(),
         tx: f.settle_tx ?? "",
+      })),
+      precision: (w.precision ?? []).map((p) => ({
+        market_id: p.market_id,
+        title: p.title,
+        status: p.status,
+        guess: p.guess,
+        stake_micro: p.stake,
+        score: p.score,
+        payout_micro: p.payout,
+      })),
+      combos: (w.combos ?? []).map((c) => ({
+        quote_hash: c.quote_hash,
+        status: c.status,
+        legs: c.legs,
+        stake_micro: c.stake,
+        payout_micro: c.payout,
+        resolve_tx: c.resolve_tx,
       })),
     }));
   },
@@ -440,7 +486,12 @@ export const api = {
   },
 
   async leaderboard(marketId: string): Promise<{ entries: PrecisionEntry[]; status: string }> {
-    return get(`/markets/${marketId}/precision/leaderboard`);
+    // An empty pool comes back as {entries: null} (Go nil slice → JSON null);
+    // coerce to [] so consumers can .reduce/.some/.map safely.
+    const r = await get<{ entries: PrecisionEntry[] | null; status: string }>(
+      `/markets/${marketId}/precision/leaderboard`,
+    );
+    return { entries: r.entries ?? [], status: r.status };
   },
 
   // ---- combos (RFQ) ----

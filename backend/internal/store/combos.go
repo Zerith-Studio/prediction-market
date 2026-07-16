@@ -38,6 +38,9 @@ type EscrowRow struct {
 	QuoteHash [32]byte `json:"-"`
 	Taker     string   `json:"taker"`
 	Status    string   `json:"status"`
+	Stake     uint64   `json:"stake"`
+	Payout    uint64   `json:"payout"`
+	Legs      int      `json:"legs"`
 	AcceptTx  string   `json:"accept_tx,omitempty"`
 	ResolveTx string   `json:"resolve_tx,omitempty"`
 }
@@ -333,9 +336,11 @@ func (s *Store) ResolveEscrow(ctx context.Context, quoteHash [32]byte, outcome s
 // EscrowsForWallet lists combos where the wallet is taker or MM (portfolio).
 func (s *Store) EscrowsForWallet(ctx context.Context, wallet string) ([]EscrowRow, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT e.quote_hash, e.taker, e.status, COALESCE(e.accept_tx,''), COALESCE(e.resolve_tx,'')
+		SELECT e.quote_hash, e.taker, e.status, COALESCE(e.accept_tx,''), COALESCE(e.resolve_tx,''),
+		       q.stake, q.payout, jsonb_array_length(q.legs)
 		FROM combo_escrows e JOIN combo_quotes q ON q.quote_hash = e.quote_hash
-		WHERE e.taker = $1 OR q.maker = $1`, wallet)
+		WHERE e.taker = $1 OR q.maker = $1
+		ORDER BY e.quote_hash`, wallet)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +349,8 @@ func (s *Store) EscrowsForWallet(ctx context.Context, wallet string) ([]EscrowRo
 	for rows.Next() {
 		var e EscrowRow
 		var qh []byte
-		if err := rows.Scan(&qh, &e.Taker, &e.Status, &e.AcceptTx, &e.ResolveTx); err != nil {
+		if err := rows.Scan(&qh, &e.Taker, &e.Status, &e.AcceptTx, &e.ResolveTx,
+			&e.Stake, &e.Payout, &e.Legs); err != nil {
 			return nil, err
 		}
 		copy(e.QuoteHash[:], qh)

@@ -44,8 +44,12 @@ export function borshOrder(o: OrderMsg): Uint8Array {
 export function randomSalt(): bigint {
   const b = new Uint8Array(8);
   crypto.getRandomValues(b);
-  // Clear the top bit: the backend stores salts in a signed BIGINT column.
-  b[7] &= 0x7f;
+  // Cap the salt at 53 bits. It is *signed* over borsh as a u64 but *posted* as
+  // a JSON number (float64, no bigint), so anything above 2^53 would round-trip
+  // lossily and break signature verification. 53 bits is ample uniqueness and
+  // still fits the backend's signed BIGINT column.
+  b[6] &= 0x1f; // keep low 5 bits of byte 6 → 6*8 + 5 = 53 bits
+  b[7] = 0x00;
   return new DataView(b.buffer).getBigUint64(0, true);
 }
 
