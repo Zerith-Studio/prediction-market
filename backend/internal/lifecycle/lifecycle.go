@@ -238,6 +238,72 @@ func (s *Service) ResolveFixture(ctx context.Context, fixtureID string, final Fi
 	return nil
 }
 
+// ResolveMarketManually resolves a single market to an operator-chosen outcome,
+// mirroring the automatic ResolveFixture path for that one market: binary
+// markets go through the on-chain resolver + SettleMarket; precision pools score
+// against the given value (or void/refund). Combos are swept afterwards.
+// outcome is "yes" | "no" | "void" for binary markets; for precision markets
+// pass "void" to refund, otherwise value must be set (the settle actual).
+func (s *Service) ResolveMarketManually(ctx context.Context, marketID [32]byte, outcome string, value *float64) (string, error) {
+	m, err := s.store.GetMarket(ctx, marketID)
+	if err != nil {
+		return "", err
+	}
+	var txSig string
+	switch m.Type {
+	case "binary":
+		code, ok := map[string]uint8{"no": 0, "yes": 1, "void": 2}[outcome]
+		if !ok {
+			return "", fmt.Errorf("lifecycle: binary outcome must be yes|no|void, got %q", outcome)
+		}
+		status := "settled"
+		if outcome == "void" {
+			status = "void"
+		}
+		txSig, err = s.resolver.ResolveMarket(ctx, marketID, code)
+		if err != nil {
+			s.log.Error("lifecycle: manual on-chain resolve failed", "template", m.TemplateKey, "err", err)
+			// keep going: off-chain state still resolves; the index reconciles later
+		}
+		outcomeJSON, _ := json.Marshal(map[string]any{"result": outcome, "manual": true})
+		if err := s.store.SettleMarket(ctx, marketID, outcomeJSON, txSig, status); err != nil {
+			return txSig, err
+		}
+
+	case "precision":
+		if outcome == "void" {
+			if err := s.store.VoidPrecision(ctx, marketID); err != nil && err != store.ErrNotFound {
+				return "", err
+			}
+		} else {
+			if value == nil {
+				return "", fmt.Errorf("lifecycle: precision resolve requires a value")
+			}
+			scale := 2.0
+			if t, ok := templates.ByKey(m.TemplateKey); ok && t.Scale > 0 {
+				scale = t.Scale
+			}
+			outcomeJSON, _ := json.Marshal(map[string]any{"actual": *value, "manual": true})
+			if _, err := s.store.SettlePrecision(ctx, marketID, *value, scale, 2,
+				s.PrecisionRakeBps, outcomeJSON); err != nil && err != store.ErrNotFound {
+				return "", err
+			}
+		}
+
+	default:
+		return "", fmt.Errorf("lifecycle: unknown market type %q", m.Type)
+	}
+
+	if s.rfq != nil {
+		if err := s.rfq.ResolveSettled(ctx); err != nil {
+			return txSig, err
+		}
+	}
+	s.log.Info("lifecycle: market resolved manually",
+		"template", m.TemplateKey, "type", m.Type, "outcome", outcome, "tx", txSig)
+	return txSig, nil
+}
+
 func (s *Service) voidFixture(ctx context.Context, fixtureID string) error {
 	for _, t := range templates.Registry {
 		marketID := templates.MarketID(fixtureID, t.Key)

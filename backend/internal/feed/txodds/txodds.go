@@ -225,6 +225,40 @@ func clampCents(f float64) uint16 {
 	return uint16(c)
 }
 
+// OddsSnapshot fetches the fixture's current odds snapshot and maps it to
+// implied YES prices in cents per template key — the same mapping the live
+// stream applies (templateFor + impliedCents), but returned synchronously for
+// on-demand callers (the admin panel). Only the markets TxLINE actually prices
+// appear in the result.
+func (p *Provider) OddsSnapshot(ctx context.Context, fixtureID string) (map[string]uint16, error) {
+	var odds []wireOdds
+	if err := p.get(ctx, "/api/odds/snapshot/"+fixtureID, &odds); err != nil {
+		return nil, err
+	}
+	out := make(map[string]uint16, len(odds))
+	for _, o := range odds {
+		key := templateFor(o)
+		if key == "" {
+			continue
+		}
+		if price, ok := impliedCents(o); ok {
+			out[key] = price
+		}
+	}
+	return out, nil
+}
+
+// CredentialsExpiry reports when the cached TxLINE credentials expire (for the
+// admin ops dashboard). Zero time when credentials are unset.
+func (p *Provider) CredentialsExpiry() time.Time {
+	p.credsMu.Lock()
+	defer p.credsMu.Unlock()
+	if p.creds == nil {
+		return time.Time{}
+	}
+	return p.creds.ExpiresAt
+}
+
 // --- streaming -----------------------------------------------------------------
 
 // Stream subscribes to one fixture's normalized event stream. Shared SSE pumps
