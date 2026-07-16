@@ -111,36 +111,100 @@ function MatchSection({ match, markets }: { match: Match; markets: Market[] }) {
         </span>
       </div>
 
-      <div className="grid gap-x-8 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {binaries.map((m) => (
-          <Link
-            key={m.market_id}
-            href={`/market/${m.market_id}`}
-            className="group flex items-baseline justify-between gap-3 border-b border-line py-2.5 transition-colors hover:border-line2"
-          >
-            <span className="min-w-0 truncate text-[13.5px] text-ink group-hover:text-accent">
-              {m.title}
-            </span>
-            <MarketState market={m} />
-          </Link>
+          <BinaryCard key={m.market_id} m={m} />
         ))}
         {pools.map((m) => (
-          <Link
-            key={m.market_id}
-            href={`/precision/${m.market_id}`}
-            className="group flex items-baseline justify-between gap-3 border-b border-line py-2.5 transition-colors hover:border-line2"
-          >
-            <span className="min-w-0 truncate text-[13.5px] text-ink group-hover:text-accent">
+          <Link key={m.market_id} href={`/precision/${m.market_id}`} className={cardLink}>
+            <span className="line-clamp-2 text-[13.5px] leading-snug text-ink transition-colors group-hover:text-accent">
               {m.title}
             </span>
-            <span className="shrink-0 font-mono text-[10.5px] uppercase tracking-[0.12em] text-dim">
-              pool
-            </span>
+            <div className="mt-3 flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+                {kindOf(m)}
+              </span>
+              <PrecisionState market={m} />
+            </div>
           </Link>
         ))}
       </div>
     </section>
   );
+}
+
+// Market-card shells: bordered tile, subtle elevation. cardLink is the fully
+// clickable variant (pools, settled markets) with a hover-lift + press feedback;
+// cardBox is the static container used when the card holds its own Yes/No buttons.
+const cardBase =
+  "flex min-h-[68px] flex-col justify-between rounded-[3px] border border-line bg-line/40 p-4";
+const cardLink = `group ${cardBase} transition-[transform,border-color,background-color] duration-150 ease-out-strong hover:-translate-y-px hover:border-line2 hover:bg-line/70 active:translate-y-0`;
+const cardBox = `${cardBase} transition-colors duration-150 hover:border-line2`;
+
+// Yes/No quick-trade buttons — accent for YES, down for NO, with press feedback.
+const yesBtn =
+  "rounded-[2px] border border-accent/30 bg-accent/10 px-2.5 py-1 font-mono text-[11px] font-semibold uppercase tracking-wide text-accent transition-[transform,filter,background-color] duration-150 ease-out-strong hover:bg-accent/20 hover:brightness-110 active:scale-[0.96]";
+const noBtn =
+  "rounded-[2px] border border-down/30 bg-down/10 px-2.5 py-1 font-mono text-[11px] font-semibold uppercase tracking-wide text-down transition-[transform,filter,background-color] duration-150 ease-out-strong hover:bg-down/20 hover:brightness-110 active:scale-[0.96]";
+
+// BinaryCard: open markets carry Yes/No buttons that deep-link into the trade
+// panel with the outcome preselected; resolved markets show the result instead.
+function BinaryCard({ m }: { m: Market }) {
+  if (m.status === "open") {
+    return (
+      <div className={cardBox}>
+        <Link
+          href={`/market/${m.market_id}`}
+          className="line-clamp-2 text-[13.5px] leading-snug text-ink transition-colors hover:text-accent"
+        >
+          {m.title}
+        </Link>
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+            {kindOf(m)}
+          </span>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Link href={`/market/${m.market_id}?o=yes`} className={yesBtn}>
+              Yes
+            </Link>
+            <Link href={`/market/${m.market_id}?o=no`} className={noBtn}>
+              No
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <Link href={`/market/${m.market_id}`} className={cardLink}>
+      <span className="line-clamp-2 text-[13.5px] leading-snug text-ink transition-colors group-hover:text-accent">
+        {m.title}
+      </span>
+      <div className="mt-3 flex items-center justify-between">
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+          {kindOf(m)}
+        </span>
+        <MarketState market={m} />
+      </div>
+    </Link>
+  );
+}
+
+// Short human label per template — the card's meta line.
+const KIND: Record<string, string> = {
+  home_win: "Match result",
+  draw: "Match result",
+  away_win: "Match result",
+  dnb_home: "Draw no bet",
+  over_2_5: "Total goals",
+  btts: "Both to score",
+  ou_1h_075: "First half",
+  precision_total_goals: "Precision",
+  precision_total_passes: "Precision",
+};
+
+function kindOf(m: Market): string {
+  return KIND[m.template_key] ?? m.type;
 }
 
 function MarketState({ market }: { market: Market }) {
@@ -162,15 +226,42 @@ function MarketState({ market }: { market: Market }) {
   );
 }
 
+// PrecisionState mirrors MarketState for pools: a settled pool shows its winning
+// value, a kickoff-locked pool shows "locked", an open pool shows "pool".
+function PrecisionState({ market }: { market: Market }) {
+  if (market.status === "settled" && market.outcome?.value != null) {
+    return (
+      <span className="shrink-0 font-mono text-[11px] text-accent tnum">
+        {market.outcome.value}
+      </span>
+    );
+  }
+  if (market.status === "void") {
+    return <span className="shrink-0 font-mono text-[11px] text-dim">VOID</span>;
+  }
+  if (market.status === "closed") {
+    return (
+      <span className="shrink-0 font-mono text-[10.5px] uppercase tracking-[0.12em] text-dim">
+        locked
+      </span>
+    );
+  }
+  return (
+    <span className="shrink-0 font-mono text-[10.5px] uppercase tracking-[0.12em] text-accent/70">
+      pool
+    </span>
+  );
+}
+
 function IndexSkeleton() {
   return (
     <div className="space-y-6" aria-busy="true">
       {[0, 1].map((i) => (
-        <div key={i} className="rule-t space-y-3 py-6">
+        <div key={i} className="rule-t space-y-4 py-6">
           <div className="h-5 w-64 animate-pulse bg-line2/50" />
-          <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 6 }).map((_, j) => (
-              <div key={j} className="h-8 animate-pulse bg-line2/40" />
+              <div key={j} className="h-[68px] animate-pulse rounded-[3px] bg-line2/40" />
             ))}
           </div>
         </div>

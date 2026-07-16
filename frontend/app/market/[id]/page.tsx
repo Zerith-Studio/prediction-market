@@ -13,10 +13,18 @@ import { PitchTicker } from "@/components/PitchTicker";
 import { MarketSkeleton } from "@/components/Skeletons";
 import { usePitchWallet } from "@/lib/wallet";
 
-export default function MarketPage({ params }: { params: { id: string } }) {
+export default function MarketPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams: { o?: string };
+}) {
   const wallet = usePitchWallet();
   const m = useLiveMarket(params.id, wallet.address);
   const up = m.priceDelta >= 0;
+  // A card's Yes/No button deep-links here with ?o=yes|no to preselect the side.
+  const initialOutcome: 0 | 1 = searchParams?.o === "no" ? 0 : 1;
 
   return (
     <div className="min-h-screen">
@@ -87,6 +95,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
                     yesPrice={m.yesPrice}
                     balanceMicro={m.balanceMicro}
                     marketStatus={m.market.status}
+                    initialOutcome={initialOutcome}
                     onPlaced={m.refreshBalance}
                   />
                 </div>

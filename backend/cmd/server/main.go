@@ -27,6 +27,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -202,6 +203,7 @@ func run(log *slog.Logger) error {
 		fixtureSrc = provider
 		comp, _ := strconv.Atoi(envOr("TXODDS_COMPETITION", "72"))
 		go discoverFixtures(ctx, provider, lc, bot, comp, log)
+		go reconcileResolutions(ctx, st, lc, provider, log)
 		log.Info("feed: TxLINE live", "competition", comp)
 	case "replay":
 		if fixture := os.Getenv("DEMO_FIXTURE"); fixture != "" {
@@ -315,6 +317,92 @@ func discoverFixtures(ctx context.Context, provider *txodds.Provider, lc *lifecy
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+		}
+	}
+}
+
+// reconcileResolutions is the durability guarantee behind full-time resolution.
+// The live SSE full_time event is the fast path; if it's ever missed (the
+// service was down, the stream dropped, or TxLINE never emits it) this loop
+// recovers it. On startup and every few minutes it walks the unresolved,
+// past-kickoff matches and, per the hybrid policy: resolves immediately when
+// TxLINE's snapshot reports finished; else auto-resolves once the score has held
+// steady long enough to be final; else leaves the match for manual review
+// (surfaced as stale in /admin/ops). ResolveFixture is idempotent, so this runs
+// safely alongside the live path and across restarts.
+func reconcileResolutions(ctx context.Context, st *store.Store, lc *lifecycle.Service,
+	provider *txodds.Provider, log *slog.Logger) {
+	const (
+		grace           = 2 * time.Hour  // leave matches alone until well past kickoff
+		interval        = 3 * time.Minute
+		stabilityWindow = 40 * time.Minute // hybrid: score unchanged this long ⇒ final
+	)
+	type stable struct {
+		score string
+		since time.Time
+	}
+	seen := map[string]stable{}
+
+	resolve := func(fixtureID string, final lifecycle.FinalScore, why string) {
+		log.Info("reconcile: resolving fixture", "fixture", fixtureID, "why", why,
+			"score", fmt.Sprintf("%d-%d", final.HomeGoals, final.AwayGoals))
+		if err := lc.ResolveFixture(ctx, fixtureID, final); err != nil {
+			log.Error("reconcile: resolve failed", "fixture", fixtureID, "err", err)
+			return
+		}
+		delete(seen, fixtureID)
+	}
+
+	run := func() {
+		matches, err := st.UnresolvedMatches(ctx, time.Now().Add(-grace))
+		if err != nil {
+			log.Warn("reconcile: list unresolved", "err", err)
+			return
+		}
+		for _, m := range matches {
+			res, finished, err := provider.FinalState(ctx, m.FixtureID)
+			if err != nil {
+				// Non-txodds fixture (e.g. replay) or a transient read — skip quietly.
+				log.Debug("reconcile: final state", "fixture", m.FixtureID, "err", err)
+				continue
+			}
+			final := lifecycle.FinalScore{
+				HomeGoals: res.Home, AwayGoals: res.Away,
+				HTHomeGoals: res.HTHome, HTAwayGoals: res.HTAway,
+				TotalPasses: res.TotalPasses,
+			}
+			if finished {
+				resolve(m.FixtureID, final, "txline reports finished")
+				continue
+			}
+			// Hybrid: auto-resolve only once the score has been stable long enough
+			// to be confident the match ended; otherwise leave it for manual review.
+			key := fmt.Sprintf("%d-%d-%d-%d", res.Home, res.Away, res.HTHome, res.HTAway)
+			s, ok := seen[m.FixtureID]
+			switch {
+			case !ok || s.score != key:
+				seen[m.FixtureID] = stable{score: key, since: time.Now()}
+				log.Info("reconcile: unresolved — tracking score stability",
+					"fixture", m.FixtureID, "score", key)
+			case time.Since(s.since) >= stabilityWindow:
+				resolve(m.FixtureID, final, "no finished signal but score stable")
+			default:
+				log.Info("reconcile: awaiting finished signal or stability",
+					"fixture", m.FixtureID, "score", key,
+					"stable_for", time.Since(s.since).Round(time.Minute))
+			}
+		}
+	}
+
+	run() // startup recovery — catch anything missed while down
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			run()
 		}
 	}
 }

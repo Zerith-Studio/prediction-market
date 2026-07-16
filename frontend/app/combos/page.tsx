@@ -159,7 +159,7 @@ export default function CombosPage() {
                   <div className="mb-2 eyebrow">
                     {match.home} vs {match.away}
                   </div>
-                  <div className="grid gap-x-8 sm:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     {ms.map((m) => {
                       const picked = legs.some((l) => l.market.market_id === m.market_id);
                       const isBlocked = blocked(m);
@@ -169,23 +169,27 @@ export default function CombosPage() {
                           onClick={() => !isBlocked && toggle(m)}
                           disabled={isBlocked}
                           aria-pressed={picked}
-                          className={`flex items-baseline justify-between gap-3 border-b py-2.5 text-left transition-colors ${
+                          className={`group flex min-h-[68px] flex-col justify-between rounded-[3px] border p-4 text-left transition-[transform,border-color,background-color] duration-150 ease-out-strong ${
                             picked
-                              ? "border-accent"
+                              ? "border-accent bg-accent/[0.06]"
                               : isBlocked
-                                ? "cursor-not-allowed border-line opacity-30"
-                                : "border-line hover:border-line2"
+                                ? "cursor-not-allowed border-line bg-transparent opacity-30"
+                                : "border-line bg-line/40 hover:-translate-y-px hover:border-line2 hover:bg-line/70 active:translate-y-0"
                           }`}
                         >
-                          <span className={`min-w-0 truncate text-[13.5px] ${picked ? "text-accent" : "text-ink"}`}>
-                            {m.title} <span className="text-dim">· YES</span>
+                          <span className={`line-clamp-2 text-[13.5px] leading-snug ${picked ? "text-accent" : "text-ink"}`}>
+                            {m.title}
                           </span>
-                          {picked && <span className="font-mono text-[11px] text-accent">✓</span>}
-                          {isBlocked && (
-                            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-dim">
-                              exclusive
-                            </span>
-                          )}
+                          <div className="mt-3 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.12em]">
+                            <span className={picked ? "text-accent/70" : "text-dim"}>Yes</span>
+                            {picked ? (
+                              <span className="text-accent">✓ picked</span>
+                            ) : isBlocked ? (
+                              <span className="text-dim">exclusive</span>
+                            ) : (
+                              <span className="text-dim transition-colors group-hover:text-muted">add</span>
+                            )}
+                          </div>
                         </button>
                       );
                     })}

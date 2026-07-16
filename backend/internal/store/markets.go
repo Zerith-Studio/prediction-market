@@ -93,6 +93,33 @@ func (s *Store) ListMatches(ctx context.Context) ([]MatchRow, error) {
 	return out, rows.Err()
 }
 
+// UnresolvedMatches returns matches kicked off before `olderThan` that still have
+// at least one market awaiting resolution (status not settled/void). The
+// resolution reconciler walks these to recover missed full-time events — a
+// bounded, usually-empty set (only past-kickoff matches with open markets).
+func (s *Store) UnresolvedMatches(ctx context.Context, olderThan time.Time) ([]MatchRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT m.id, m.txodds_fixture_id, m.home, m.away, m.kickoff_at, m.status, m.live_state
+		FROM matches m
+		WHERE m.kickoff_at < $1
+		  AND EXISTS (SELECT 1 FROM markets mk
+		              WHERE mk.match_id = m.id AND mk.status NOT IN ('settled','void'))
+		ORDER BY m.kickoff_at`, olderThan)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MatchRow
+	for rows.Next() {
+		var m MatchRow
+		if err := rows.Scan(&m.ID, &m.FixtureID, &m.Home, &m.Away, &m.KickoffAt, &m.Status, &m.LiveState); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // CreateMarket inserts a market row in 'open' status. Idempotent on market_id.
 func (s *Store) CreateMarket(ctx context.Context, marketID [32]byte, matchID, templateKey, typ, title, rule string) error {
 	_, err := s.pool.Exec(ctx, `
