@@ -6,8 +6,8 @@
 
 Two pinnable iOS home-screen widgets for the PitchMarket Expo app:
 
-1. **Portfolio widget** (small + medium) — available balance, position value, unrealised / realised PnL, locked funds; medium adds top position rows.
-2. **Active-market widget** (medium) — the user's **biggest open position by value**: market title, side/size, avg → current price, unrealised PnL, and a sparkline of recent fill prices.
+1. **Portfolio widget** (medium) — available balance, position value, unrealised / realised PnL, locked funds, and the open-orders count.
+2. **Active-market widget** (large) — the user's **biggest open position by value**: market title, current price (big), entry (avg bought) price, side/size, unrealised + realised PnL for that market, and a proper price chart of recent fills.
 
 Refresh model (agreed): **periodic** — WidgetKit timeline every ~15 min, plus an immediate reload whenever the app updates shared state (wallet connect, foreground refresh). No streaming; widgets show a "as of HH:MM" stamp.
 
@@ -26,8 +26,8 @@ mobile/
     Widgets.swift              # @main WidgetBundle: PortfolioWidget + ActiveMarketWidget
     Provider.swift             # shared TimelineProvider-ish helpers: config load, fetch, decode
     Api.swift                  # wire DTOs (Decodable, snake_case) + PnL math
-    PortfolioViews.swift       # SwiftUI small/medium views
-    ActiveMarketViews.swift    # SwiftUI medium view + sparkline (Path)
+    PortfolioViews.swift       # SwiftUI medium view
+    ActiveMarketViews.swift    # SwiftUI large view + price chart (Path)
   src/lib/widgetBridge.ts      # RN side: write shared config, reload widgets
   app.json                     # + "@bacons/apple-targets" plugin, App Group entitlement
 ```
@@ -52,17 +52,16 @@ Per open position (`yes>0 || no>0`):
 - `cur` = best_bid>0 ? (YES ? best_bid : 100−best_bid) : avg_cost
 - `valueMicro = qty × cur × 10_000`; `unrealizedMicro = valueMicro − qty × avg_cost × 10_000`
 
-Aggregates: **Available** = `balance.usdc_available`; **Position value** = Σ valueMicro; **Unrealised** = Σ unrealizedMicro; **Realised** = Σ realized (all positions, incl. flat ones); **Locked** = Σ over live BUY orders of `remaining × price × 10_000` (USDC soft-locked on the book). Active market = open position with max valueMicro.
+Aggregates: **Available** = `balance.usdc_available`; **Position value** = Σ valueMicro; **Unrealised** = Σ unrealizedMicro; **Realised** = Σ realized (all positions, incl. flat ones); **Locked** = Σ over live BUY orders of `remaining × price × 10_000` (USDC soft-locked on the book); **Open orders** = count of live orders. Active market = open position with max valueMicro.
 
-Sparkline: last ≤100 fills for that market from `/markets/{id}/fills`, plotted price-vs-ts, YES terms (fills are stored in YES terms already — same as `RecentFills`); flat line at `cur` if <2 fills.
+Chart: last ≤100 fills for that market from `/markets/{id}/fills`, plotted price-vs-ts, YES terms (fills are stored in YES terms already — same as `RecentFills`), with a dashed reference line at the entry (avg_cost) price so the chart reads as "price vs where I bought"; flat line at `cur` if <2 fills.
 
 ### Visual
 
 Dark, matching the app palette (`bg #0A0A0A`-family, ink/muted/dim grays, accent green for gains, red for losses — copy hexes from `mobile/tailwind.config.js` into a Swift `Palette` enum). Monospaced digits (`.monospacedDigit()`), "as of HH:MM" footer, `containerBackground` API (iOS 17+, matches the existing `deploymentTarget: 17.5`).
 
-- **Portfolio small:** Available (large), unrealised PnL (signed, tinted) + realised beneath.
-- **Portfolio medium:** 4-stat row (Available · Value · Unrealised · Realised) + Locked line + top 2 positions (title, side·qty, PnL).
-- **Active-market medium:** title + side·qty (left), unrealised PnL + avg→cur (right), sparkline across the bottom.
+- **Portfolio medium (only size):** 4-stat grid (Available · Value · Unrealised · Realised, PnL signed + tinted) with a footer line `N open orders · $X locked · as of HH:MM`.
+- **Active-market large (only size):** header = market title + side·qty badge; price block = current price big (e.g. `47¢`) with entry beside it (`bought 42¢`); PnL row = unrealised (tinted, dominant) + realised-for-this-market when nonzero; price chart fills the lower half with the dashed entry line and gain/loss-tinted stroke.
 - **Empty states:** no wallet → "Open PitchMarket to connect"; no positions (active-market) → "No open positions".
 
 ## Config plugin changes (`app.json`)
@@ -87,6 +86,6 @@ Dark, matching the app palette (`bg #0A0A0A`-family, ink/muted/dim grays, accent
 
 ## Cut lines (in order, if time runs out)
 
-1. Portfolio **small** size only (drop medium rows).
-2. Sparkline → flat avg→cur bar (drop the fills fetch).
-3. Locked stat (drop; it's the only stat needing the orders array).
+1. Chart → simple sparkline without the entry reference line.
+2. Chart → flat avg→cur bar (drop the fills fetch entirely).
+3. Locked stat + orders count (drop; the only stats needing the orders array).
