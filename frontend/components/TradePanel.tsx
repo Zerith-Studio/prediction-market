@@ -145,35 +145,23 @@ export function TradePanel({
 
   const maxShares = Math.floor(balanceMicro / (p * 10_000));
 
+  // Quick-add chips nudge the existing size — a faster way to set the same
+  // `size` state, no new trade inputs.
+  const addSize = (d: number) => {
+    setServerError(null);
+    setSize(String(Math.max(0, n + d)));
+  };
+
   return (
-    <div>
-      <div className="mb-5 flex items-baseline justify-between">
-        <h2 className="text-[13px] font-semibold text-ink">Trade</h2>
-        <span className="max-w-[170px] truncate font-mono text-[11px] text-dim">
-          {outcome === 1 ? "YES" : "NO"} · {marketTitle}
-        </span>
+    <div className="border border-line p-5 sm:p-6">
+      {/* header — selected market */}
+      <div className="mb-6">
+        <div className="eyebrow">Selected</div>
+        <h2 className="mt-1 truncate text-[15px] font-semibold text-ink">{marketTitle}</h2>
       </div>
 
+      {/* buy / sell */}
       <div className="mb-5 grid grid-cols-2">
-        <SideTab
-          active={outcome === 1}
-          tone="up"
-          underlineId="trade-outcome-underline"
-          onClick={() => selectOutcome(1)}
-        >
-          YES · {yesPrice}¢
-        </SideTab>
-        <SideTab
-          active={outcome === 0}
-          tone="down"
-          underlineId="trade-outcome-underline"
-          onClick={() => selectOutcome(0)}
-        >
-          NO · {100 - yesPrice}¢
-        </SideTab>
-      </div>
-
-      <div className="mb-6 grid grid-cols-2">
         <SideTab
           active={side === "buy"}
           tone="up"
@@ -192,48 +180,97 @@ export function TradePanel({
         </SideTab>
       </div>
 
-      <Field label="Limit price" hint="¢ 1–99">
-        <NumInput
-          value={price}
-          unit="¢"
-          disabled={locked}
-          onChange={(v) => {
-            setTouchedPrice(true);
-            setServerError(null);
-            setPrice(v);
-          }}
+      {/* yes / no outcome pills */}
+      <div className="mb-6 grid grid-cols-2 gap-2.5">
+        <OutcomePill
+          active={outcome === 1}
+          tone="up"
+          label="Yes"
+          price={yesPrice}
+          onClick={() => selectOutcome(1)}
         />
-      </Field>
+        <OutcomePill
+          active={outcome === 0}
+          tone="down"
+          label="No"
+          price={100 - yesPrice}
+          onClick={() => selectOutcome(0)}
+        />
+      </div>
 
-      <Field label="Size" hint={connected ? `max ${maxShares.toLocaleString()}` : ""}>
-        <NumInput
+      {/* amount (size) — the prominent number, mirroring the reference */}
+      <div className="mb-1 flex items-baseline justify-between">
+        <span className="eyebrow">Size</span>
+        <span className="font-mono text-[11px] text-dim">
+          {connected ? `max ${maxShares.toLocaleString()}` : ""}
+        </span>
+      </div>
+      <div
+        className={`flex items-baseline gap-2 border-b border-line2 pb-1.5 transition-colors focus-within:border-accent ${
+          locked ? "opacity-40" : ""
+        }`}
+      >
+        <input
+          inputMode="numeric"
           value={size}
-          unit="shares"
           disabled={locked}
-          onChange={(v) => {
+          onChange={(e) => {
             setServerError(null);
-            setSize(v);
+            setSize(e.target.value.replace(/[^0-9]/g, ""));
           }}
+          className="w-full bg-transparent font-mono text-[40px] font-light leading-none text-ink outline-none tnum sm:text-[46px]"
         />
-      </Field>
+        <span className="font-mono text-[13px] text-dim">shares</span>
+      </div>
 
-      <dl className="mb-5 mt-6 space-y-2.5 font-mono text-[12.5px]">
-        <div className="flex items-baseline justify-between">
-          <dt className="text-dim">{side === "buy" ? "Cost" : "Proceeds"}</dt>
-          <dd className="text-ink tnum">{usd(costMicro)}</dd>
+      {/* quick-add chips */}
+      <div className="mt-3.5 flex flex-wrap gap-2">
+        <Chip disabled={locked} onClick={() => addSize(100)}>
+          +100
+        </Chip>
+        <Chip disabled={locked} onClick={() => addSize(500)}>
+          +500
+        </Chip>
+        <Chip disabled={locked} onClick={() => addSize(1000)}>
+          +1k
+        </Chip>
+        <Chip
+          disabled={locked || !connected || maxShares <= 0}
+          onClick={() => setSize(String(maxShares))}
+        >
+          MAX
+        </Chip>
+      </div>
+
+      {/* limit price — compact secondary control */}
+      <div
+        className={`mt-5 flex items-center justify-between border-b border-line2 pb-2 transition-colors focus-within:border-accent ${
+          locked ? "opacity-40" : ""
+        }`}
+      >
+        <span className="eyebrow">Limit price</span>
+        <div className="flex items-baseline gap-1.5">
+          <input
+            inputMode="numeric"
+            value={price}
+            disabled={locked}
+            onChange={(e) => {
+              setTouchedPrice(true);
+              setServerError(null);
+              setPrice(e.target.value.replace(/[^0-9]/g, ""));
+            }}
+            className="w-14 bg-transparent text-right font-mono text-[18px] font-light text-ink outline-none tnum"
+          />
+          <span className="font-mono text-[12px] text-dim">¢</span>
         </div>
-        <div className="flex items-baseline justify-between">
-          <dt className="text-dim">Max payout</dt>
-          <dd className="text-accent tnum">{usd(payoutMicro)}</dd>
-        </div>
-      </dl>
+      </div>
 
       <AnimatePresence>
         {error && (
           <motion.p
-            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-            animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
-            exit={{ opacity: 0, height: 0, marginBottom: 0, transition: { duration: 0.12 } }}
+            initial={{ opacity: 0, height: 0, marginTop: 0 }}
+            animate={{ opacity: 1, height: "auto", marginTop: 16 }}
+            exit={{ opacity: 0, height: 0, marginTop: 0, transition: { duration: 0.12 } }}
             transition={{ duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
             className="overflow-hidden font-mono text-[12px] text-down"
             role="alert"
@@ -252,15 +289,14 @@ export function TradePanel({
         )}
       </AnimatePresence>
 
+      {/* primary CTA — neutral, like the reference's prominent action button */}
       <button
         onClick={place}
         disabled={!canSubmit}
-        className={`w-full px-5 py-3.5 text-[14px] font-semibold tracking-tight transition-[transform,filter,background-color,color] duration-150 ease-out-strong disabled:cursor-not-allowed enabled:active:scale-[0.98] ${
+        className={`mt-6 w-full px-5 py-3.5 text-[14px] font-semibold tracking-tight transition-[transform,filter,background-color,color] duration-150 ease-out-strong disabled:cursor-not-allowed enabled:active:scale-[0.98] ${
           locked
             ? "bg-line2 text-dim"
-            : side === "buy"
-              ? "bg-accent text-bg hover:brightness-110 disabled:bg-line2 disabled:text-dim"
-              : "bg-down text-bg hover:brightness-110 disabled:bg-line2 disabled:text-dim"
+            : "bg-ink text-bg hover:brightness-90 disabled:bg-line2 disabled:text-dim"
         }`}
       >
         {/* keyed crossfade: the state morph is the feedback (rare, deliberate
@@ -281,7 +317,31 @@ export function TradePanel({
         </AnimatePresence>
       </button>
 
-      <p className="mt-3 font-mono text-[11px] leading-relaxed text-dim">
+      {/* order summary + payout */}
+      <dl className="mt-6 space-y-2.5 font-mono text-[12.5px]">
+        <div className="flex items-baseline justify-between">
+          <dt className="text-dim">Shares</dt>
+          <dd className="text-ink tnum">{n.toLocaleString()}</dd>
+        </div>
+        <div className="flex items-baseline justify-between">
+          <dt className="text-dim">{side === "buy" ? "Cost" : "Proceeds"}</dt>
+          <dd className="text-ink tnum">{usd(costMicro)}</dd>
+        </div>
+      </dl>
+
+      <div className="mt-4 flex items-end justify-between rule-t pt-4">
+        <div>
+          <div className="text-[13px] font-semibold text-accent">
+            {side === "buy" ? "To win" : "Max payout"}
+          </div>
+          <div className="mt-1 font-mono text-[11px] text-dim tnum">Avg. price {p}¢</div>
+        </div>
+        <div className="font-mono text-[26px] font-light leading-none text-accent tnum sm:text-[30px]">
+          {usd(payoutMicro)}
+        </div>
+      </div>
+
+      <p className="mt-5 font-mono text-[11px] leading-relaxed text-dim">
         {locked
           ? "Market closed at kickoff."
           : wallet.isDemo && connected
@@ -374,52 +434,60 @@ function SideTab({
   );
 }
 
-function Field({
+// Big filled Yes / No selector, styled after the reference: the chosen outcome
+// is a solid colour, the other a translucent tint of its own colour.
+function OutcomePill({
+  active,
+  tone,
   label,
-  hint,
-  children,
+  price,
+  onClick,
 }: {
+  active: boolean;
+  tone: "up" | "down";
   label: string;
-  hint: string;
-  children: React.ReactNode;
+  price: number;
+  onClick: () => void;
 }) {
+  const isUp = tone === "up";
   return (
-    <label className="mb-5 block">
-      <span className="mb-1 flex items-baseline justify-between font-mono text-[11px] text-muted">
-        <span className="tracking-[0.04em]">{label}</span>
-        <span className="text-dim">{hint}</span>
-      </span>
-      {children}
-    </label>
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={`flex items-center justify-center gap-2 border py-3.5 text-[14px] font-semibold transition-[background-color,border-color,color] duration-150 ${
+        active
+          ? isUp
+            ? "border-accent bg-accent text-bg"
+            : "border-down bg-down text-bg"
+          : isUp
+            ? "border-transparent bg-accent/10 text-accent hover:bg-accent/[0.16]"
+            : "border-transparent bg-down/10 text-down hover:bg-down/[0.16]"
+      }`}
+    >
+      <span>{label}</span>
+      <span className="font-mono tnum">{price}¢</span>
+    </button>
   );
 }
 
-function NumInput({
-  value,
-  unit,
+// Quick-add amount chip (the reference's +$1/+$20/…/MAX row).
+function Chip({
+  onClick,
   disabled,
-  onChange,
+  children,
 }: {
-  value: string;
-  unit: string;
+  onClick: () => void;
   disabled?: boolean;
-  onChange: (v: string) => void;
+  children: React.ReactNode;
 }) {
   return (
-    <div
-      className={`flex items-baseline justify-between border-b border-line2 pb-1.5 transition-colors focus-within:border-accent ${
-        disabled ? "opacity-40" : ""
-      }`}
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="border border-line2 px-3 py-1.5 font-mono text-[12px] text-muted transition-colors hover:border-dim hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 enabled:active:scale-[0.97]"
     >
-      <input
-        inputMode="numeric"
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value.replace(/[^0-9]/g, ""))}
-        className="w-full bg-transparent font-mono text-[22px] font-light text-ink outline-none tnum"
-      />
-      <span className="ml-2 font-mono text-[12px] text-dim">{unit}</span>
-    </div>
+      {children}
+    </button>
   );
 }
 

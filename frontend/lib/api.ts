@@ -2,11 +2,13 @@ import type {
   Book,
   BookLevel,
   Fill,
+  Lineups,
   Market,
   Match,
   Portfolio,
   Settlement,
   Side,
+  TeamMatchStats,
 } from "./types";
 
 export const explorerTx = (sig: string) =>
@@ -111,10 +113,19 @@ interface WireMatch {
   away: string;
   kickoff_at: string;
   status: "scheduled" | "live" | "finished";
-  live_state: { minute?: number; home_goals?: number; away_goals?: number };
+  live_state: {
+    minute?: number;
+    period?: string;
+    home_goals?: number;
+    away_goals?: number;
+    possession?: { home: number; away: number };
+    stats?: { home: TeamMatchStats; away: TeamMatchStats };
+  };
+  lineups?: Lineups | null;
 }
 
 export function mapMatch(w: WireMatch): Match {
+  const ls = w.live_state ?? {};
   return {
     id: w.id,
     fixture_id: w.fixture_id,
@@ -123,11 +134,15 @@ export function mapMatch(w: WireMatch): Match {
     kickoff_at: w.kickoff_at,
     status: w.status === "finished" ? "ft" : w.status,
     live_state: {
-      minute: w.live_state?.minute,
-      period: w.status === "finished" ? "FT" : undefined,
-      home_score: w.live_state?.home_goals ?? 0,
-      away_score: w.live_state?.away_goals ?? 0,
+      minute: ls.minute,
+      period: ls.period ?? (w.status === "finished" ? "FT" : undefined),
+      home_score: ls.home_goals ?? 0,
+      away_score: ls.away_goals ?? 0,
+      possession: ls.possession,
+      stats: ls.stats,
     },
+    // 'null' JSONB deserializes to null; normalize to undefined-ish for the UI.
+    lineups: w.lineups ?? null,
   };
 }
 
@@ -246,11 +261,19 @@ export const api = {
   },
 
   async getMatch(matchId: string): Promise<Match> {
-    return get<Match, { matches: WireMatch[] | null }>(`/matches`, (w) => {
-      const m = (w.matches ?? []).find((x) => x.id === matchId);
-      if (!m) throw new ApiError(404, "match not found");
-      return mapMatch(m);
-    });
+    // Full detail (live_state + team sheets) from the dedicated route. Fall back
+    // to the list endpoint if the backend predates that route (404) — the market
+    // page still loads, just without lineups/stats until the backend redeploys.
+    try {
+      return await get<Match, WireMatch>(`/matches/${matchId}`, mapMatch);
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.status !== 404) throw e;
+      return get<Match, { matches: WireMatch[] | null }>(`/matches`, (w) => {
+        const m = (w.matches ?? []).find((x) => x.id === matchId);
+        if (!m) throw new ApiError(404, "match not found");
+        return mapMatch(m);
+      });
+    }
   },
 
   async getBook(id: string): Promise<Book> {
