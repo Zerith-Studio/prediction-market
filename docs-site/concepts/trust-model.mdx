@@ -1,0 +1,73 @@
+---
+title: "Trust model"
+description: "Who has to be trusted with what, and how the design shrinks the operator's power."
+---
+
+The design was grilled to bedrock across ADRs 0001–0005. This page is the trust story
+in order; the [ADR index](/reference/adrs) has the full decisions.
+
+## Signed orders, operator crank (ADR 0003)
+
+The core move is **decoupling signatures**:
+
+- **Users sign orders** — cheap, off-chain ed25519 messages: "move up to `size` of my
+  funds at a price no worse than my limit." Twenty orders = twenty silent signatures,
+  zero transactions, zero wallet popups.
+- **The operator signs settlements** — on-chain transactions, and pays the gas. The
+  `settle_match` instruction verifies both users' order signatures **on-chain** and
+  enforces per-order fill accounting (`OrderStatus.remaining`), so the operator cannot
+  forge a trade, exceed a signed order, replay it, or take custody.
+
+Funds live in per-user **Vault PDAs**; the user signs live exactly once, at deposit.
+The operator's power is bounded to **liveness, ordering, and censorship** — it decides
+who matches and when, and can refuse to match, but never move money outside a signed
+order.
+
+## Off-chain state is UX, on-chain state is truth
+
+Postgres soft-locks exist so the operator never over-commits a user — but they are not
+the security boundary. If a `settle_match` or `combo_accept` transaction reverts (e.g.
+losing a race), the backend unwinds its soft-lock and re-emits `order_update`; a losing
+race is a no-op, not a stuck order (interface contract §6).
+
+## The oracle is the real seam (ADR 0005)
+
+The confession at the heart of ADR 0005: bounding custody power is not enough, because
+**oracle power lets you pay the pot to whichever side you choose and call it a
+settlement**. So resolution has an explicit build ladder:
+
+| Tier | Mechanism | Status |
+|---|---|---|
+| **(a)** single resolver key | operator-signed `resolve_market` | ✅ implemented; the demo floor |
+| **(d)** TxODDS-signed data | program verifies TxODDS's ed25519 signature on the outcome on-chain; operator collapses to a pure relay | 🔴 designed, gated on TxODDS providing signed data |
+| **(b)** commit-reveal + challenge window | UMA-lite fallback if (d) is unreachable | 🔴 not started |
+
+Finality policy (independent of tier): resolution has **three states, `YES | NO | VOID`**
+(VOID covers abandonment — escrow refunds each party its own contribution). Settlement
+keys off a `final=true` flag plus a T+X-minute delay; revisions inside the window
+supersede, revisions after payout are explicitly out of scope because escrow is
+non-clawbackable by design.
+
+## Combos add no new oracle (ADR 0004)
+
+Combo resolution reads the **same leg-condition Market PDAs** that binary redemption
+reads, computes the AND on-chain, and pays the escrow. Negotiation is off-chain; escrow
+and resolution are on-chain; no party is asked what a leg did.
+
+<Note>
+For the demo build, combos actually run off-chain behind an interface seam (the
+on-chain `combo_accept` / `resolve_combo` instructions are typed stubs returning
+`NotImplemented`) — the cut order of ADR 0007. The trust claim above describes the
+designed on-chain path.
+</Note>
+
+## What is honestly custodial today
+
+- **Precision pools** are off-chain by design (Tier 2, ADR 0006) — pool-based products
+  have no priced complete set to escrow.
+- **Combos** run off-chain in the demo (see above).
+- **Resolution** is tier-a: a single resolver key, held by the operator.
+
+The never-cut hill (ADR 0007): one match, one binary market, fully on-chain-trustless
+end to end — signed order → crank → settlement → resolve → redeem. That path is done
+and proven on devnet.

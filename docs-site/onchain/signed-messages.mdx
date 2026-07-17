@@ -1,0 +1,87 @@
+---
+title: "Signed messages & tx layout"
+description: "The canonical borsh Order message, the golden-vector discipline, and the pinned settle_match transaction layout."
+---
+
+## The signed Order message (interface contract §1)
+
+The canonical borsh-serialized struct the **user** signs client-side. The backend stores
+it, the crank passes it into `settle_match`, and the program verifies the signature
+on-chain:
+
+```rust
+struct Order {
+  maker:      Pubkey,   // user
+  market_id:  [u8;32],
+  outcome:    u8,       // 0 = NO, 1 = YES
+  side:       u8,       // 0 = BUY (provide USDC), 1 = SELL (provide tokens)
+  price:      u16,      // 1..99  (¢, implied P of `outcome`)
+  size:       u64,      // shares
+  fee_bps:    u16,      // 0 for the demo
+  expiry:     i64,      // unix; 0 = GTC
+  salt:       u64,      // per-order uniqueness / replay marker (NOT a sequential nonce)
+}
+// signed     = ed25519(maker_privkey, borsh(Order))
+// order_hash = sha256(borsh(Order))
+```
+
+Both sides enforce the collateral rules at entry: BUY requires
+`available_USDC ≥ price·size + fee`; SELL requires `token_balance(outcome) ≥ size`.
+
+There is an analogous signed `ComboQuote` message (interface contract §2) for RFQ
+combos: `{maker, legs[], stake, payout, expiry, salt}`, single-use by hash-marked salt.
+
+## Five encoders, one golden vector
+
+`borsh(Order)` is independently implemented in:
+
+| Encoder | Location | Pinned by |
+|---|---|---|
+| Rust (on-chain) | `programs/pitchmarket/src/sig_verify.rs` `borsh_order()` | Rust unit tests |
+| Go (backend) | `backend/internal/models/hash.go` `BorshOrder()` | `hash_conformance_test.go` |
+| TypeScript (test harness) | `tests/helpers.ts` | proven at runtime vs the program |
+| TypeScript (web) | `frontend/lib/borsh.ts` | `npm run build` prebuild gate |
+| TypeScript (mobile) | `mobile/src/lib/borsh.ts` | `npm run check-borsh` |
+
+All five are pinned byte-identical by the **same golden vector**. If you touch any
+encoder, update that vector in every suite and run them all — a one-byte divergence
+means every signature fails verification.
+
+<Warning>
+A real bug this discipline caught: JavaScript's `Number(bigint)` silently rounds values
+≥ 2⁵³. A 63-bit random `salt` signed one value and transmitted another, so ~99.9% of
+orders failed signature verification. `randomSalt()` now draws below 2⁵³ so the
+bigint → Number → JSON → uint64 round-trip is exact (fixed in `mobile/`; the same flaw
+is flagged in `frontend/lib/borsh.ts` per `progress.md`).
+</Warning>
+
+## The pinned settle_match transaction (interface contract §6.5)
+
+Ed25519 verification on Solana is instruction introspection, not a program call. The
+crank **must** build every settle_match transaction as exactly three instructions:
+
+```
+ix[0] = Ed25519Program.createInstructionWithPublicKey(taker.maker, borsh(taker), taker_sig)
+ix[1] = Ed25519Program.createInstructionWithPublicKey(maker.maker, borsh(maker), maker_sig)
+ix[2] = settle_match(...)
+```
+
+`settle_match` reads ix[0]/ix[1] via the instructions sysvar and asserts each one's
+`(pubkey, message)` matches `(order.maker, borsh(order))` exactly
+(`programs/pitchmarket/src/sig_verify.rs`). Wrong order or omitted ed25519 instructions
+**fail closed** with `BadSignature` — verification is never silently skipped.
+
+### Why it must be a v0 transaction
+
+The full 3-instruction transaction measures ~1453 bytes — over the 1232-byte legacy
+limit. It is therefore pinned as a **v0 transaction with a per-market Address Lookup
+Table** holding the market's static accounts and each trading wallet's vault/ATAs. The
+operator (fee payer) and the two per-order `OrderStatus` PDAs stay static keys —
+OrderStatus PDAs are unique per order, and keeping them inline avoids a table-extend +
+activation wait on every settle.
+
+Measured in the crank's tests: legacy 1421&nbsp;B ❌ vs v0 1116&nbsp;B ✅.
+
+Reference implementations: `backend/internal/crank/{builder,lut}.go` (Go, production)
+and `tests/helpers.ts` (TypeScript). `builder_test.go` re-implements the on-chain byte
+checks against the same golden vectors.
