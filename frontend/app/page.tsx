@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, configured } from "@/lib/api";
+import { kindOf } from "@/lib/kinds";
 import type { Market, Match } from "@/lib/types";
 import { TopBar } from "@/components/TopBar";
 import { FlagPair } from "@/components/TeamFlag";
@@ -199,23 +200,6 @@ function BinaryCard({ m, match }: { m: Market; match: Match }) {
       </div>
     </Link>
   );
-}
-
-// Short human label per template — the card's meta line.
-const KIND: Record<string, string> = {
-  home_win: "Match result",
-  draw: "Match result",
-  away_win: "Match result",
-  dnb_home: "Draw no bet",
-  over_2_5: "Total goals",
-  btts: "Both to score",
-  ou_1h_075: "First half",
-  precision_total_goals: "Precision",
-  precision_total_passes: "Precision",
-};
-
-function kindOf(m: Market): string {
-  return KIND[m.template_key] ?? m.type;
 }
 
 function MarketState({ market }: { market: Market }) {

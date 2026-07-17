@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { CommandPalette, SearchIcon } from "@/components/CommandPalette";
 import { usd } from "@/lib/format";
 import { usePitchWallet } from "@/lib/wallet";
 
@@ -14,8 +16,22 @@ const NAV: { label: string; href: string }[] = [
 export function TopBar({ balanceMicro }: { balanceMicro: number }) {
   const wallet = usePitchWallet();
   const path = usePathname();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [modKey, setModKey] = useState("⌘");
   const isActive = (href: string) =>
     href === "/" ? path === "/" || path.startsWith("/market") : path.startsWith(href) && href !== "#";
+
+  useEffect(() => {
+    if (!/Mac|iPhone|iPad/.test(navigator.platform)) setModKey("Ctrl");
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <header className="sticky top-0 z-40 rule-b bg-bg/85 backdrop-blur-md">
@@ -47,6 +63,17 @@ export function TopBar({ balanceMicro }: { balanceMicro: number }) {
         </div>
 
         <div className="flex items-center gap-5">
+          <button
+            onClick={() => setSearchOpen(true)}
+            aria-label="Search markets"
+            className="flex items-center gap-2 font-mono text-[12.5px] text-dim transition-colors hover:text-muted"
+          >
+            <SearchIcon />
+            <span className="hidden md:inline">Search</span>
+            <kbd className="hidden rounded-[2px] border border-line2 px-1.5 py-0.5 text-[10px] tracking-[0.08em] md:inline">
+              {modKey} K
+            </kbd>
+          </button>
           {wallet.address && (
             <div className="hidden font-mono text-[12.5px] text-muted tnum sm:block">
               <span className="text-dim">vault</span>{" "}
@@ -74,6 +101,7 @@ export function TopBar({ balanceMicro }: { balanceMicro: number }) {
           )}
         </div>
       </div>
+      <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
     </header>
   );
 }
