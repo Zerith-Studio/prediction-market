@@ -57,6 +57,20 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     if (open && !loading) inputRef.current?.focus();
   }, [open, loading]);
 
+  // Global Escape: the dialog's onKeyDown only fires when focus is inside it,
+  // which isn't guaranteed (e.g. while loading the input isn't focused yet).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   const matchById = useMemo(() => new Map(matches.map((m) => [m.id, m])), [matches]);
 
   const results = useMemo(() => {

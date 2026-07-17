@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CommandPalette, SearchIcon } from "@/components/CommandPalette";
@@ -81,15 +81,11 @@ export function TopBar({ balanceMicro }: { balanceMicro: number }) {
             </div>
           )}
           {wallet.address ? (
-            <button
-              onClick={wallet.disconnect}
-              title="Disconnect"
-              className="font-mono text-[12.5px] text-muted transition-colors hover:text-ink"
-            >
-              <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-accent align-middle" />
-              {short(wallet.address)}
-              {wallet.isDemo && <span className="ml-1.5 text-dim">demo</span>}
-            </button>
+            <WalletMenu
+              address={wallet.address}
+              isDemo={wallet.isDemo}
+              onDisconnect={wallet.disconnect}
+            />
           ) : (
             <button
               onClick={wallet.connect}
@@ -108,4 +104,92 @@ export function TopBar({ balanceMicro }: { balanceMicro: number }) {
 
 function short(addr: string): string {
   return `${addr.slice(0, 4)}…${addr.slice(-4)}`;
+}
+
+function WalletMenu({
+  address,
+  isDemo,
+  onDisconnect,
+}: {
+  address: string;
+  isDemo: boolean;
+  onDisconnect: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch {
+      /* clipboard unavailable — ignore */
+    }
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Wallet"
+        className="font-mono text-[12.5px] text-muted transition-colors hover:text-ink"
+      >
+        <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-accent align-middle" />
+        {short(address)}
+        {isDemo && <span className="ml-1.5 text-dim">demo</span>}
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-50 mt-2 w-[248px] rounded-[3px] border border-line2 bg-bg shadow-2xl"
+        >
+          <div className="rule-b px-3 py-2.5">
+            <div className="eyebrow mb-1">Wallet</div>
+            <div className="break-all font-mono text-[11.5px] leading-relaxed text-muted">
+              {address}
+            </div>
+          </div>
+          <button
+            role="menuitem"
+            onClick={copy}
+            className="flex w-full items-center justify-between px-3 py-2.5 text-left font-mono text-[12.5px] text-muted transition-colors hover:bg-line/70 hover:text-ink"
+          >
+            <span>Copy address</span>
+            {copied && <span className="text-accent">copied</span>}
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onDisconnect();
+            }}
+            className="flex w-full items-center px-3 py-2.5 text-left font-mono text-[12.5px] text-muted transition-colors hover:bg-line/70 hover:text-down"
+          >
+            Log out
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
