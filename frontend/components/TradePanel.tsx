@@ -18,6 +18,7 @@ export function TradePanel({
   yesPrice,
   balanceMicro,
   marketStatus,
+  initialOutcome = 1,
   onPlaced,
 }: {
   marketId: string;
@@ -25,11 +26,15 @@ export function TradePanel({
   yesPrice: number;
   balanceMicro: number;
   marketStatus: MarketStatus;
+  initialOutcome?: 0 | 1; // 1 = YES, 0 = NO (from a card's Yes/No button)
   onPlaced?: () => void;
 }) {
   const wallet = usePitchWallet();
+  const [outcome, setOutcome] = useState<0 | 1>(initialOutcome);
   const [side, setSide] = useState<Side>("buy");
-  const [price, setPrice] = useState(String(yesPrice));
+  // The ladder is quoted in YES cents; NO trades at the complement.
+  const outcomePrice = outcome === 1 ? yesPrice : 100 - yesPrice;
+  const [price, setPrice] = useState(String(outcomePrice));
   const [size, setSize] = useState("500");
   const [submit, setSubmit] = useState<SubmitState>("idle");
   const [placedLabel, setPlacedLabel] = useState("Resting on book");
@@ -38,8 +43,15 @@ export function TradePanel({
   const [funding, setFunding] = useState(false);
 
   useEffect(() => {
-    if (!touchedPrice) setPrice(String(yesPrice));
-  }, [yesPrice, touchedPrice]);
+    if (!touchedPrice) setPrice(String(outcomePrice));
+  }, [outcomePrice, touchedPrice]);
+
+  // Switching YES↔NO resnaps the limit price to that outcome's quote.
+  function selectOutcome(o: 0 | 1) {
+    setOutcome(o);
+    setTouchedPrice(false);
+    setServerError(null);
+  }
 
   const locked = marketStatus !== "open";
   const connected = !!wallet.address;
@@ -75,7 +87,7 @@ export function TradePanel({
       const msg = borshOrder({
         maker: bs58.decode(wallet.address!),
         marketId: fromHex(marketId),
-        outcome: 1, // this panel trades the YES ladder
+        outcome,
         side: side === "buy" ? 0 : 1,
         price: p,
         size: BigInt(n),
@@ -87,7 +99,7 @@ export function TradePanel({
       const res = await api.postOrder({
         maker: wallet.address!,
         market_id: marketId,
-        outcome: 1,
+        outcome,
         side: side === "buy" ? 0 : 1,
         price: p,
         size: n,
@@ -138,15 +150,44 @@ export function TradePanel({
       <div className="mb-5 flex items-baseline justify-between">
         <h2 className="text-[13px] font-semibold text-ink">Trade</h2>
         <span className="max-w-[170px] truncate font-mono text-[11px] text-dim">
-          YES · {marketTitle}
+          {outcome === 1 ? "YES" : "NO"} · {marketTitle}
         </span>
       </div>
 
+      <div className="mb-5 grid grid-cols-2">
+        <SideTab
+          active={outcome === 1}
+          tone="up"
+          underlineId="trade-outcome-underline"
+          onClick={() => selectOutcome(1)}
+        >
+          YES · {yesPrice}¢
+        </SideTab>
+        <SideTab
+          active={outcome === 0}
+          tone="down"
+          underlineId="trade-outcome-underline"
+          onClick={() => selectOutcome(0)}
+        >
+          NO · {100 - yesPrice}¢
+        </SideTab>
+      </div>
+
       <div className="mb-6 grid grid-cols-2">
-        <SideTab active={side === "buy"} tone="up" onClick={() => setSide("buy")}>
+        <SideTab
+          active={side === "buy"}
+          tone="up"
+          underlineId="trade-side-underline"
+          onClick={() => setSide("buy")}
+        >
           Buy
         </SideTab>
-        <SideTab active={side === "sell"} tone="down" onClick={() => setSide("sell")}>
+        <SideTab
+          active={side === "sell"}
+          tone="down"
+          underlineId="trade-side-underline"
+          onClick={() => setSide("sell")}
+        >
           Sell
         </SideTab>
       </div>
@@ -226,7 +267,7 @@ export function TradePanel({
             action — worth animating); blur masks the two-states overlap */}
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.span
-            key={buttonKey(locked, connected, submit, side)}
+            key={buttonKey(locked, connected, submit, side, outcome)}
             initial={{ opacity: 0, y: 5, filter: "blur(2px)" }}
             animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
             exit={{ opacity: 0, y: -5, filter: "blur(2px)", transition: { duration: 0.1 } }}
@@ -235,7 +276,7 @@ export function TradePanel({
           >
             {submit === "signing" && <Loader2 size={15} className="animate-spin" />}
             {submit === "placed" && <Check size={15} />}
-            {buttonLabel(locked, connected, submit, side, placedLabel)}
+            {buttonLabel(locked, connected, submit, side, outcome, placedLabel)}
           </motion.span>
         </AnimatePresence>
       </button>
@@ -251,10 +292,16 @@ export function TradePanel({
   );
 }
 
-function buttonKey(locked: boolean, connected: boolean, submit: SubmitState, side: Side) {
+function buttonKey(
+  locked: boolean,
+  connected: boolean,
+  submit: SubmitState,
+  side: Side,
+  outcome: 0 | 1
+) {
   if (locked) return "locked";
   if (!connected) return "connect";
-  return `${submit}-${submit === "idle" ? side : ""}`;
+  return `${submit}-${submit === "idle" ? `${side}-${outcome}` : ""}`;
 }
 
 function buttonLabel(
@@ -262,13 +309,15 @@ function buttonLabel(
   connected: boolean,
   submit: SubmitState,
   side: Side,
+  outcome: 0 | 1,
   placedLabel: string
 ) {
   if (locked) return "Trading closed";
   if (!connected) return "Connect wallet";
   if (submit === "signing") return "Signing…";
   if (submit === "placed") return placedLabel;
-  return side === "buy" ? "Sign & Buy YES" : "Sign & Sell YES";
+  const o = outcome === 1 ? "YES" : "NO";
+  return side === "buy" ? `Sign & Buy ${o}` : `Sign & Sell ${o}`;
 }
 
 function placeErrorMessage(e: unknown, side: Side): string {
@@ -292,11 +341,13 @@ function placeErrorMessage(e: unknown, side: Side): string {
 function SideTab({
   active,
   tone,
+  underlineId,
   onClick,
   children,
 }: {
   active: boolean;
   tone: "up" | "down";
+  underlineId: string;
   onClick: () => void;
   children: React.ReactNode;
 }) {
@@ -310,10 +361,10 @@ function SideTab({
     >
       {children}
       {active && (
-        /* one underline shared across both tabs — the slide states the
+        /* one underline shared across each tab pair — the slide states the
            segmented relationship; a jump reads as two unrelated buttons */
         <motion.span
-          layoutId="trade-side-underline"
+          layoutId={underlineId}
           transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
           className={`absolute inset-x-0 -bottom-0.5 h-0.5 ${tone === "up" ? "bg-accent" : "bg-down"}`}
           aria-hidden

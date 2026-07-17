@@ -446,6 +446,21 @@ func (s *Server) handleAdminOps(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ops["markets_by_status"] = tally
+
+	// Stale unresolved matches — well past kickoff but still not fully settled.
+	// The reconciler auto-resolves what it can; whatever lingers here needs the
+	// operator to resolve it by hand (the hybrid policy's manual-review backstop).
+	stale := []map[string]any{}
+	if rows, err := s.store.UnresolvedMatches(r.Context(), time.Now().Add(-3*time.Hour)); err == nil {
+		for _, m := range rows {
+			stale = append(stale, map[string]any{
+				"fixture_id": m.FixtureID, "home": m.Home, "away": m.Away,
+				"kickoff": m.KickoffAt, "status": m.Status,
+			})
+		}
+	}
+	ops["stale_matches"] = stale
+
 	writeJSON(w, http.StatusOK, ops)
 }
 

@@ -165,6 +165,36 @@ the automatic path, so money safety is unchanged. Auth is demo-grade (session
 tokens live in memory); production auth is out of scope. Covered by
 `internal/api/admin_test.go` (auth round-trip + single-market resolve).
 
+## Resolution durability — missed full-time events self-heal
+
+The live path resolves a match when TxLINE's SSE feed delivers `full_time`. That
+event is a **single ephemeral trigger** — if it's missed (service down during the
+window, SSE reconnect gap, or TxLINE never emits `final_whistle`), the old design
+left the match stuck `live` forever and its markets never settled (exactly what
+happened to fixture `18241006`).
+
+There's now a **reconciliation guarantee** behind it
+(`cmd/server reconcileResolutions`), modeled on the existing chain-index
+reconciler: on **startup** and every few minutes it walks the *unresolved,
+past-kickoff* matches (`store.UnresolvedMatches` — a bounded, usually-empty set)
+and pulls TxLINE's **score snapshot** (`txodds.FinalState`), which is
+authoritative and queryable any time unlike the transient stream. Per the
+**hybrid policy**:
+
+- TxLINE snapshot reports **finished** → resolve immediately.
+- No finished signal, but the **score has held steady** past a stability window
+  (40 min) → auto-resolve (a live match doesn't go 40 min without an event).
+- Otherwise → leave it, surfaced as a **stale match in `/admin/ops`** for the
+  operator to resolve by hand.
+
+`ResolveFixture` is **idempotent** (skips already-settled markets — verified by
+`TestResolveFixtureIdempotent`, incl. no double payout), so the reconciler runs
+safely alongside the live SSE path and across restarts, and can finish a
+*partially* resolved match. This is the fast-path-plus-reconcile durability
+pattern, not naive polling — the loop is idle when everything is healthy. The
+admin panel remains the final human backstop. (Note: `total_passes` still isn't
+mapped from the txodds feed, so the passes precision pool needs an admin value.)
+
 ## Run the suite yourself
 
 ```sh
