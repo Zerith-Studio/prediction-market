@@ -1,28 +1,10 @@
 "use client";
 
 import type { Match } from "@/lib/types";
-
-const TEAM_DOT: Record<string, string> = {
-  Brazil: "linear-gradient(135deg,#ffd21e,#009c3b)",
-  Argentina: "linear-gradient(135deg,#75aadb,#ffffff)",
-  France: "linear-gradient(135deg,#0055a4,#ef4135)",
-  England: "linear-gradient(135deg,#ffffff,#cf142b)",
-  Spain: "linear-gradient(135deg,#c60b1e,#ffc400)",
-  Germany: "linear-gradient(135deg,#dd0000,#ffce00)",
-};
+import { TeamFlag } from "@/components/TeamFlag";
 
 function periodLabel(p?: string) {
   return p === "1H" ? "1ST HALF" : p === "HT" ? "HALF TIME" : p === "2H" ? "2ND HALF" : p === "FT" ? "FULL TIME" : "LIVE";
-}
-
-function Dot({ team }: { team: string }) {
-  return (
-    <span
-      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-      style={{ background: TEAM_DOT[team] ?? "#565b63" }}
-      aria-hidden
-    />
-  );
 }
 
 export function MatchHero({ match }: { match: Match }) {
@@ -56,7 +38,7 @@ export function MatchHero({ match }: { match: Match }) {
           <span className="truncate text-[22px] font-bold tracking-tight sm:text-[32px]">
             {match.home}
           </span>
-          <Dot team={match.home} />
+          <TeamFlag team={match.home} size={26} />
         </div>
         <div className="shrink-0 font-mono text-[24px] font-light tracking-[0.12em] text-ink tnum sm:text-[34px]">
           {home_score}
@@ -64,7 +46,7 @@ export function MatchHero({ match }: { match: Match }) {
           {away_score}
         </div>
         <div className="flex min-w-0 items-center gap-2.5">
-          <Dot team={match.away} />
+          <TeamFlag team={match.away} size={26} />
           <span className="truncate text-[22px] font-bold tracking-tight sm:text-[32px]">
             {match.away}
           </span>

@@ -10,6 +10,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { api, configured, wsUrl, type RFQQuote } from "@/lib/api";
 import type { Market, Match } from "@/lib/types";
 import { usd } from "@/lib/format";
+import { FlagPair } from "@/components/TeamFlag";
 import { TopBar } from "@/components/TopBar";
 import { usePitchWallet } from "@/lib/wallet";
 
@@ -156,8 +157,11 @@ export default function CombosPage() {
               if (!ms.length) return null;
               return (
                 <div key={match.id} className="rule-t py-4">
-                  <div className="mb-2 eyebrow">
-                    {match.home} vs {match.away}
+                  <div className="mb-2 flex items-center gap-2 eyebrow">
+                    <FlagPair home={match.home} away={match.away} size={16} />
+                    <span>
+                      {match.home} vs {match.away}
+                    </span>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {ms.map((m) => {
