@@ -5,6 +5,7 @@ import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { useLiveMarket } from "@/lib/useLiveMarket";
 import { TopBar } from "@/components/TopBar";
 import { MatchHero } from "@/components/MatchHero";
+import { MatchCentre } from "@/components/MatchCentre";
 import { PriceChart } from "@/components/PriceChart";
 import { OrderBook } from "@/components/OrderBook";
 import { RecentFills } from "@/components/RecentFills";
@@ -37,69 +38,77 @@ export default function MarketPage({
           <>
             <MatchHero match={m.match} />
 
-            {/* price + chart */}
+            {/* real TxLINE match detail — live stats + team sheets */}
+            <MatchCentre match={m.match} />
+
+            {/* chart (2/3) + trade panel (1/3), side by side */}
             <section className="rule-t pt-8">
-              <div className="mb-8 flex items-end justify-between gap-6">
-                <div>
-                  <div className="mb-3 flex items-baseline gap-2">
-                    <h1 className="text-[15px] font-semibold text-ink">
-                      {m.market.title}
-                    </h1>
-                    <span className="eyebrow">binary · on-chain</span>
+              <div className="grid gap-8 lg:grid-cols-3 lg:gap-10">
+                {/* left: price header + chart */}
+                <div className="min-w-0 lg:col-span-2">
+                  <div className="mb-8 flex items-end justify-between gap-6">
+                    <div>
+                      <div className="mb-3 flex items-baseline gap-2">
+                        <h1 className="text-[15px] font-semibold text-ink">
+                          {m.market.title}
+                        </h1>
+                        <span className="eyebrow">binary · on-chain</span>
+                      </div>
+                      <div className="flex items-baseline gap-3">
+                        <span className="font-mono text-[46px] font-light leading-none text-ink tnum sm:text-[64px]">
+                          {m.yesPrice}
+                          <span className="ml-0.5 text-[22px] text-dim sm:text-[28px]">¢</span>
+                        </span>
+                        <span
+                          className={`flex items-center gap-0.5 font-mono text-[13px] tnum ${
+                            up ? "text-accent" : "text-down"
+                          }`}
+                        >
+                          {up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
+                          {Math.abs(m.priceDelta)}¢
+                        </span>
+                      </div>
+                      <p className="mt-2.5 font-mono text-[12px] text-muted">
+                        YES · implied {m.yesPrice}% ·{" "}
+                        <span className="text-dim">NO {100 - m.yesPrice}¢</span>
+                      </p>
+                    </div>
+                    <div className="hidden text-right font-mono text-[12px] text-dim sm:block">
+                      <div className="text-muted tnum">
+                        {"$" + (m.fills.reduce((a, f) => a + f.price * f.size, 0) / 100).toLocaleString()}
+                      </div>
+                      <div>session volume</div>
+                    </div>
                   </div>
-                  <div className="flex items-baseline gap-3">
-                    <span className="font-mono text-[46px] font-light leading-none text-ink tnum sm:text-[64px]">
-                      {m.yesPrice}
-                      <span className="ml-0.5 text-[22px] text-dim sm:text-[28px]">¢</span>
-                    </span>
-                    <span
-                      className={`flex items-center gap-0.5 font-mono text-[13px] tnum ${
-                        up ? "text-accent" : "text-down"
-                      }`}
-                    >
-                      {up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-                      {Math.abs(m.priceDelta)}¢
-                    </span>
-                  </div>
-                  <p className="mt-2.5 font-mono text-[12px] text-muted">
-                    YES · implied {m.yesPrice}% ·{" "}
-                    <span className="text-dim">NO {100 - m.yesPrice}¢</span>
-                  </p>
+
+                  <PriceChart data={m.history} up={up} />
                 </div>
-                <div className="hidden text-right font-mono text-[12px] text-dim sm:block">
-                  <div className="text-muted tnum">
-                    {"$" + (m.fills.reduce((a, f) => a + f.price * f.size, 0) / 100).toLocaleString()}
+
+                {/* right: trade panel */}
+                <div className="lg:col-span-1">
+                  <div className="lg:sticky lg:top-[76px]">
+                    <TradePanel
+                      marketId={params.id}
+                      marketTitle={m.market.title}
+                      yesPrice={m.yesPrice}
+                      balanceMicro={m.balanceMicro}
+                      marketStatus={m.market.status}
+                      initialOutcome={initialOutcome}
+                      onPlaced={m.refreshBalance}
+                    />
                   </div>
-                  <div>session volume</div>
                 </div>
               </div>
-
-              <PriceChart data={m.history} up={up} />
             </section>
 
             <div className="rule-t rule-b">
               <PitchTicker lines={m.oneliners} index={m.onelinerIdx} />
             </div>
 
-            {/* book + trades + trade panel */}
-            <div className="grid gap-10 py-10 lg:grid-cols-[1fr_300px]">
-              <div className="grid gap-10 sm:grid-cols-2 lg:gap-12">
-                <OrderBook book={m.book} flashId={m.lastFillId} flashSide={m.lastFillSide} />
-                <RecentFills fills={m.fills} yesPrice={m.yesPrice} />
-              </div>
-              <div className="lg:rule-l lg:pl-10">
-                <div className="lg:sticky lg:top-[76px]">
-                  <TradePanel
-                    marketId={params.id}
-                    marketTitle={m.market.title}
-                    yesPrice={m.yesPrice}
-                    balanceMicro={m.balanceMicro}
-                    marketStatus={m.market.status}
-                    initialOutcome={initialOutcome}
-                    onPlaced={m.refreshBalance}
-                  />
-                </div>
-              </div>
+            {/* book + trades */}
+            <div className="grid gap-10 py-10 sm:grid-cols-2 lg:gap-12">
+              <OrderBook book={m.book} flashId={m.lastFillId} flashSide={m.lastFillSide} />
+              <RecentFills fills={m.fills} yesPrice={m.yesPrice} />
             </div>
 
             <footer className="rule-t py-6 font-mono text-[11px] text-dim">

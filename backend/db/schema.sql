@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS matches (
     status            TEXT NOT NULL DEFAULT 'scheduled', -- scheduled|live|finished
     live_state        JSONB NOT NULL DEFAULT '{}'::jsonb
 );
+-- Team sheets (starting XI + subs) from the TxLINE scores feed. Nullable: only
+-- set once the feed delivers lineups. Added post-hoc; safe on existing DBs.
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS lineups JSONB;
 
 CREATE TABLE IF NOT EXISTS markets (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),

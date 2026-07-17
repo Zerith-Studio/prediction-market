@@ -110,6 +110,7 @@ func (s *Server) Routes() *http.ServeMux {
 
 	// Markets & matches
 	mux.HandleFunc("GET /matches", s.handleListMatches)
+	mux.HandleFunc("GET /matches/{id}", s.handleGetMatch)
 	mux.HandleFunc("GET /markets", s.handleListMarkets)
 	mux.HandleFunc("GET /markets/{id}", s.handleGetMarket)
 	mux.HandleFunc("GET /markets/{id}/book", s.handleGetBook)
@@ -295,13 +296,38 @@ func (s *Server) handleListMatches(w http.ResponseWriter, r *http.Request) {
 func marshalMatches(matches []store.MatchRow) []map[string]any {
 	out := make([]map[string]any, len(matches))
 	for i, m := range matches {
-		out[i] = map[string]any{
-			"id": m.ID, "fixture_id": m.FixtureID, "home": m.Home, "away": m.Away,
-			"kickoff_at": m.KickoffAt, "status": m.Status,
-			"live_state": json.RawMessage(m.LiveState),
-		}
+		out[i] = matchJSON(m, false)
 	}
 	return out
+}
+
+// matchJSON builds a match DTO. The list view stays lean; the detail view
+// (withLineups) also carries the team sheets, which can be large.
+func matchJSON(m store.MatchRow, withLineups bool) map[string]any {
+	out := map[string]any{
+		"id": m.ID, "fixture_id": m.FixtureID, "home": m.Home, "away": m.Away,
+		"kickoff_at": m.KickoffAt, "status": m.Status,
+		"live_state": json.RawMessage(m.LiveState),
+	}
+	if withLineups {
+		out["lineups"] = json.RawMessage(m.Lineups) // 'null' when the feed hasn't sent them
+	}
+	return out
+}
+
+// handleGetMatch returns one match's full detail (live_state + team sheets) by
+// its UUID id — the /market page's match-centre source.
+func (s *Server) handleGetMatch(w http.ResponseWriter, r *http.Request) {
+	m, err := s.store.GetMatchByID(r.Context(), r.PathValue("id"))
+	if errors.Is(err, store.ErrNotFound) {
+		httpError(w, http.StatusNotFound, "match not found")
+		return
+	}
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, matchJSON(m, true))
 }
 
 func marketJSON(m store.MarketRow) map[string]any {

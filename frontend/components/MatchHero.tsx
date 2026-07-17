@@ -3,13 +3,24 @@
 import type { Match } from "@/lib/types";
 import { TeamFlag } from "@/components/TeamFlag";
 
-function periodLabel(p?: string) {
-  return p === "1H" ? "1ST HALF" : p === "HT" ? "HALF TIME" : p === "2H" ? "2ND HALF" : p === "FT" ? "FULL TIME" : "LIVE";
+function periodLabel(p?: string): string | null {
+  return p === "1H" ? "1ST HALF" : p === "HT" ? "HALF TIME" : p === "2H" ? "2ND HALF" : p === "FT" ? "FULL TIME" : null;
 }
 
 export function MatchHero({ match }: { match: Match }) {
   const live = match.status === "live" || match.status === "ht";
   const { minute, period, home_score = 0, away_score = 0 } = match.live_state;
+
+  // Build "LIVE · <period> · <minute>'" from only the parts we actually have,
+  // so a live match with no clock/period reads "LIVE" — never "LIVE · LIVE ·
+  // undefined'".
+  const liveLabel = [
+    "LIVE",
+    periodLabel(period),
+    typeof minute === "number" ? `${minute}'` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <section className="py-7 sm:py-9">
@@ -19,7 +30,7 @@ export function MatchHero({ match }: { match: Match }) {
             <span className="h-[7px] w-[7px] rounded-full bg-down animate-live-pulse-down" aria-hidden />
           )}
           <span className={live ? "text-down" : "text-dim"}>
-            {live ? `LIVE · ${periodLabel(period)} · ${minute}'` : "SCHEDULED"}
+            {live ? liveLabel : "SCHEDULED"}
           </span>
         </div>
         <div className="min-w-0 truncate eyebrow">

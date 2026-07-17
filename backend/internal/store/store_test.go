@@ -41,6 +41,93 @@ func order(maker [32]byte, marketID [32]byte, outcome, side uint8, price uint16,
 	}
 }
 
+// TestMatchLineupsAndLiveState proves the lineups column migration plus the
+// SetMatchLineups / SetMatchState / GetMatchByID round-trip against a real DB.
+func TestMatchLineupsAndLiveState(t *testing.T) {
+	s := storetest.Open(t)
+	matchID, err := s.UpsertMatch(ctx, "fx-lineup", "Spain", "Argentina", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("UpsertMatch: %v", err)
+	}
+
+	// A freshly-registered match has no team sheets yet: COALESCE → 'null'.
+	m, err := s.GetMatchByID(ctx, matchID)
+	if err != nil {
+		t.Fatalf("GetMatchByID: %v", err)
+	}
+	if string(m.Lineups) != "null" {
+		t.Fatalf("fresh match lineups = %q, want null", m.Lineups)
+	}
+
+	lineups := []byte(`{"home":{"team":"Spain","formation":"4-3-3","starters":[
+		{"number":"23","name":"Simon, Unai","position":"Goalkeeper","unit":1},
+		{"number":"16","name":"Rodri","position":"Central Midfielder","unit":3,"captain":true}],
+		"subs":[{"number":"1","name":"Raya, David","unit":1}]},
+		"away":{"team":"Argentina","formation":"4-4-2","starters":[
+		{"number":"10","name":"Messi, Lionel","position":"Forward","unit":4,"captain":true}],"subs":[]}}`)
+	if err := s.SetMatchLineups(ctx, "fx-lineup", lineups); err != nil {
+		t.Fatalf("SetMatchLineups: %v", err)
+	}
+
+	live := []byte(`{"minute":58,"period":"2H","home_goals":1,"away_goals":1,
+		"possession":{"home":54,"away":46},
+		"stats":{"home":{"yellow":1,"red":0,"corners":5},"away":{"yellow":2,"red":0,"corners":3}}}`)
+	if err := s.SetMatchState(ctx, "fx-lineup", "live", live); err != nil {
+		t.Fatalf("SetMatchState: %v", err)
+	}
+
+	m, err = s.GetMatchByID(ctx, matchID)
+	if err != nil {
+		t.Fatalf("GetMatchByID (after writes): %v", err)
+	}
+	if m.Status != "live" {
+		t.Errorf("status = %q, want live", m.Status)
+	}
+
+	var ls struct {
+		Period     string `json:"period"`
+		Possession struct{ Home, Away int } `json:"possession"`
+		Stats      struct {
+			Home struct{ Yellow, Corners int } `json:"home"`
+		} `json:"stats"`
+	}
+	if err := json.Unmarshal(m.LiveState, &ls); err != nil {
+		t.Fatalf("live_state unmarshal: %v", err)
+	}
+	if ls.Period != "2H" || ls.Possession.Home != 54 || ls.Stats.Home.Corners != 5 {
+		t.Errorf("live_state round-trip: %+v", ls)
+	}
+
+	var lu struct {
+		Home struct {
+			Team      string
+			Formation string
+			Starters  []struct {
+				Number, Name, Position string
+				Unit                   int
+				Captain                bool
+			}
+			Subs []struct{ Number, Name string }
+		}
+	}
+	if err := json.Unmarshal(m.Lineups, &lu); err != nil {
+		t.Fatalf("lineups unmarshal: %v", err)
+	}
+	if lu.Home.Team != "Spain" || lu.Home.Formation != "4-3-3" ||
+		len(lu.Home.Starters) != 2 || len(lu.Home.Subs) != 1 {
+		t.Errorf("lineups round-trip: %+v", lu.Home)
+	}
+	if lu.Home.Starters[1].Name != "Rodri" || !lu.Home.Starters[1].Captain {
+		t.Errorf("captain flag lost: %+v", lu.Home.Starters[1])
+	}
+
+	// Fixture-keyed read must see the same sheets.
+	byFix, err := s.GetMatchByFixture(ctx, "fx-lineup")
+	if err != nil || string(byFix.Lineups) == "null" {
+		t.Errorf("GetMatchByFixture lineups: %v / %q", err, byFix.Lineups)
+	}
+}
+
 func TestPlaceOrderLocksAndRejects(t *testing.T) {
 	s := storetest.Open(t)
 	var marketID [32]byte
