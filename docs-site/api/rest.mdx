@@ -1,0 +1,73 @@
+---
+title: "REST API"
+description: "The full HTTP surface served by backend/cmd/server (default :8080)."
+---
+
+Source of truth: `backend/internal/api/api.go` (`Routes()`) and interface contract §5.
+All money values are integer micro-USDC; prices are integer cents (1..99). The server
+sets permissive CORS for browser clients and answers `GET /healthz` with 200.
+
+Error semantics are consistent and tested: bad signature → **401**, insufficient funds
+→ **402**, replayed salt / double-accept → **409**, post-kickoff precision entry →
+**410**. Attack-surface tests pin that malformed input always produces a 4xx, never
+a 5xx.
+
+## Trading
+
+| Method & path | What it does |
+|---|---|
+| `POST /orders` | Submit a signed `Order` (borsh fields + hex ed25519 signature). Verified, soft-locked, matched; response includes any immediate fills. Resting remainder goes on the book. |
+| `DELETE /orders/{hash}?maker=...` | Cancel a resting order (maker-authenticated). |
+
+## Markets & matches
+
+| Method & path | What it does |
+|---|---|
+| `GET /matches` | Live fixtures (score, minute, match state). |
+| `GET /markets?status=open` | Markets, filterable by status. |
+| `GET /markets/{id}` | One market; resolved markets include the devnet `explorer_url` for the resolution tx. |
+| `GET /markets/{id}/book` | Order-book snapshot (per-outcome ladders; the frontend unifies them into one YES ladder). |
+| `GET /markets/{id}/fills` | Recent fills. |
+| `GET /markets/{id}/settlement` | Settlement detail for a resolved market. |
+| `GET /markets/{id}/oneliners` | AI-generated one-line market commentary. |
+
+## Combos (RFQ)
+
+| Method & path | What it does |
+|---|---|
+| `POST /combos` | Open an RFQ for a set of legs (mutex-group-checked). |
+| `GET /combos/{id}` | RFQ state + quotes. |
+| `POST /combos/{id}/quotes` | MM submits a signed `ComboQuote`. |
+| `POST /combos/{id}/accept` | Taker accepts a quote — single-use; a second accept is 409. |
+
+## Precision pools
+
+| Method & path | What it does |
+|---|---|
+| `POST /markets/{id}/precision` | Enter a guess + stake. One entry per wallet; locked at kickoff (410 after). |
+| `GET /markets/{id}/precision/leaderboard` | Live σ-scored leaderboard. |
+
+## Wallet & portfolio
+
+| Method & path | What it does |
+|---|---|
+| `POST /wallet/deposit` | Demo/mirror-mode faucet deposit. |
+| `POST /wallet/deposit-init` | Start a real two-step cosigned devnet deposit — returns the message to sign. |
+| `POST /wallet/deposit-complete` | Finish the deposit with the user's signature. |
+| `GET /balance?wallet=...` | Vault balance (available + soft-locked). |
+| `GET /portfolio?wallet=...` | Positions with avg cost, realized/unrealized PnL, and open orders. |
+
+## Admin (operator-gated)
+
+Manual market control, authenticated by an ed25519 challenge → session token signed by
+the operator wallet (`ADMIN_PUBKEY`, defaults to the operator key). Endpoints under
+`/admin/`: `challenge`, `session`, `fixtures` (+ per-fixture `odds`, `markets`,
+`resolve`), `markets` (+ per-market `resolve`, `close`, `cancel-orders`), and `ops`
+(operational health, incl. stale unresolved matches). Source: `backend/internal/api/admin.go`.
+
+<Note>
+The interface contract §5 pins the shape of this surface; the concrete request/response
+JSON is defined by the handlers in `backend/internal/api/api.go` and exercised end to
+end by `api_e2e_test.go`. The TypeScript client in `frontend/lib/api.ts` is the
+practical reference for payload field names.
+</Note>
