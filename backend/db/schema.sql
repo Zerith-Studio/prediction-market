@@ -153,3 +153,11 @@ CREATE TABLE IF NOT EXISTS oneliners (
 
 -- post-hoc migrations (idempotent) — columns added after first bootstrap
 ALTER TABLE positions_cache ADD COLUMN IF NOT EXISTS realized BIGINT NOT NULL DEFAULT 0;
+
+-- Per-wallet market watchlist (UI preference; chain stays authoritative for money).
+CREATE TABLE IF NOT EXISTS watchlists (
+    wallet     TEXT  NOT NULL,
+    market_id  BYTEA NOT NULL REFERENCES markets(market_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (wallet, market_id)
+);
