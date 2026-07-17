@@ -150,6 +150,13 @@ func (s *Service) handleEvent(ctx context.Context, fixtureID string, ev feed.Mat
 			}
 		}
 
+	case feed.EventLineup:
+		// Team sheets are static per match — persist to their own column, not
+		// live_state. The trailing broadcast still fans them out over WS.
+		if err := s.store.SetMatchLineups(ctx, fixtureID, raw); err != nil {
+			return err
+		}
+
 	case feed.EventFullTime:
 		if err := s.store.SetMatchState(ctx, fixtureID, "finished", raw); err != nil {
 			return err

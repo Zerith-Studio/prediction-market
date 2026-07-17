@@ -1,0 +1,32 @@
+---
+title: "WebSocket API"
+description: "The /ws stream — six pinned event types pushed by the exchange core."
+---
+
+Connect to `GET /ws` on the API server (same origin as REST, default `:8080`). The hub
+broadcasts the six event types pinned in interface contract §5; slow clients are
+dropped rather than allowed to back-pressure the exchange.
+
+## Events
+
+| Event | Emitted when | Typical consumer use |
+|---|---|---|
+| `book_update` | The book changes at any level (new order, fill, cancel, expiry) | Re-render the ladder |
+| `fill` | A match settles (or mirrors) a fill | Fill feed, position refresh |
+| `order_update` | An order's state changes — including the **revert → reconcile** path when an on-chain settle loses a race and the soft-lock is unwound | Portfolio open-orders list |
+| `combo_quote` | An MM posts a quote on an open RFQ | Combo builder quote countdown |
+| `match_state` | Live fixture state changes (score, minute, kickoff, full-time) | Market header |
+| `oneliner` | A new AI one-liner is generated (~2-minute ticker) | Rotating commentary strip |
+
+## Client behavior
+
+The reference client is `frontend/lib/useLiveMarket.ts` (ported to
+`mobile/src/lib/useLiveMarket.ts` with an `AppState` foreground-refetch, since mobile
+OSes freeze sockets in the background). Pattern: load a REST snapshot first, then apply
+WS events on top; on disconnect, reconnect with backoff and re-snapshot.
+
+<Note>
+Events are broadcast to all connected clients; filtering by market happens client-side.
+The exchange core (`backend/internal/exchange`) is the single emitter — every order
+path (API and MM bot) produces the same events.
+</Note>

@@ -1,0 +1,116 @@
+---
+title: "Program: accounts & instructions"
+description: "The pitchmarket Anchor program — PDAs, instruction surface, and implementation status."
+---
+
+Source: `programs/pitchmarket/src/lib.rs` and interface contract §3–§4. Program ID
+(pinned in `declare_id!` and `Anchor.toml`, deployed on devnet):
+
+```
+3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs
+```
+
+## Units
+
+Money is integer **micro-USDC** (1 USDC = 1,000,000). Shares are `u64`; one share
+redeems to 1 USDC if its outcome wins. Prices are integers **1..99** (¢).
+
+## Accounts (PDAs)
+
+| Account | Seeds | Fields |
+|---|---|---|
+| `Market` (the condition) | `["market", market_id]` | `outcome: {Unresolved, Yes, No, Void}`, `resolver_authority`, `resolved_at`, `oracle_tier`, `yes_mint`, `no_mint`, `usdc_mint` |
+| `OrderStatus` | `["ostatus", order_hash]` | `is_filled_or_cancelled: bool`, `remaining: u64`, `order_hash` |
+| `Vault` (per user) | `["vault", user]` | `owner` (no balance on the account — custody is the vault-owned USDC ATA) |
+| `ComboEscrow` | `["combo", quote_hash]` | `taker`, `maker`, `legs`, `stake`, `payout`, `status` |
+| `QuoteStatus` | `["qstatus", quote_hash]` | `spent: bool` |
+
+`market_id: [u8;32]` is a deterministic hash of `(match_id, template_key)`.
+`order_hash = sha256(borsh(Order))` is the primary key for an order everywhere —
+on-chain, in Postgres, and in the API.
+
+## Instructions
+
+Status marks follow `progress.md`: ✅ exercised (localnet integration tests, 8/8; core
+lifecycle also proven on devnet) · 🔴 typed stub returning `NotImplemented`.
+
+### `initialize_market(market_id, oracle_tier, resolver_authority)` ✅
+
+Creates the Market PDA, both outcome mints (mint authority = the market PDA), and the
+collateral pool ATA. Called by the backend's auto market creation, one per template per
+fixture.
+
+### `init_vault()` / `deposit(amount)` ✅
+
+`init_vault` opens the per-user custody PDA (once per user). `deposit` moves real USDC
+from the user's wallet ATA into the vault-owned ATA — **the only step where the user
+signs a live transaction**; all trading afterwards is silent, off-chain-signed orders
+relayed by the operator. Deposit/redeem ATAs are created lazily via `init_if_needed`.
+
+### `settle_match(taker, taker_sig, maker, maker_sig, match_type, fill_price, fill_size)` ✅
+
+Settles one match from the off-chain engine. One transaction per fill (single taker,
+single maker). In order it:
+
+1. Requires the market `Unresolved` and `1 ≤ fill_price ≤ 99`.
+2. Verifies the caller-supplied outcome mints against the market's pinned
+   `yes_mint`/`no_mint` (which applies depends on each order's `outcome` field).
+3. Verifies **both** ed25519 order signatures via instructions-sysvar introspection —
+   see [Signed messages](/onchain/signed-messages) for the mandatory transaction layout.
+4. Applies fill accounting to both `OrderStatus` PDAs: initialized on first touch with
+   `remaining = order.size`; fails closed with `OrderClosed` if cancelled or fully
+   filled, `OverFill` if `fill_size > remaining`.
+5. Executes the money movement for the `match_type`:
+   - **NORMAL** — peer-to-peer swap at `fill_price`,
+   - **MINT** — combines both buyers' USDC into the pool and mints a complete set,
+   - **MERGE** — burns a complete set, releases pooled collateral to both sellers.
+
+<Warning>
+MINT and MERGE move money at **each order's own limit price**, not `fill_price` — only
+NORMAL uses `fill_price`. The Go store mirrors this exactly (`legDeltaFor`).
+</Warning>
+
+### `cancel_order(order_hash)` ✅
+
+Signed directly by the maker. Sets `is_filled_or_cancelled`; if the order was never
+touched by `settle_match`, `OrderStatus` is created fresh so a later fill attempt fails
+closed with `OrderClosed` regardless.
+
+### `resolve_market(outcome)` ✅ (tier-a only)
+
+Requires `oracle_tier == 0` and the signer to equal `resolver_authority`. Sets the
+outcome to `No (0)` / `Yes (1)` / `Void (2)` and stamps `resolved_at`. Tiers (b)
+challenge-window and (d) TxODDS-signed are designed (ADR 0005) but not implemented.
+
+### `redeem(outcome, amount)` ✅
+
+Requires the market resolved and `outcome` to be the winning side (any side if `Void`).
+Burns `amount` shares from the caller's vault-owned outcome ATA and transfers
+`amount × 1_000_000` micro-USDC from the market pool directly to the caller's wallet
+ATA, 1:1.
+
+### `combo_accept(quote, taker_sig)` 🔴 · `resolve_combo()` 🔴
+
+Typed stubs returning `NotImplemented`. The designed semantics (ADR 0004 / interface
+contract §4): `combo_accept` verifies the MM's quote signature, expiry, and
+`QuoteStatus.!spent`, pulls the stake from the taker and `payout − stake` from the MM
+vault into a `ComboEscrow`, and marks the quote spent. `resolve_combo` reads the N leg
+Market PDAs, computes the AND on-chain, and pays the escrow (VOID leg → refund both).
+The backend runs combos off-chain behind an interface seam until these land.
+
+## Errors you'll actually see
+
+| Error | Meaning |
+|---|---|
+| `BadSignature` | ed25519 introspection failed — wrong tx layout, wrong pubkey, or message ≠ `borsh(order)` |
+| `OrderClosed` | order cancelled or fully filled — fails closed |
+| `OverFill` | `fill_size` exceeds the order's on-chain `remaining` |
+| `MarketNotOpen` / `MarketAlreadyResolved` / `MarketNotResolved` | lifecycle-state guards |
+| `Unauthorized` | resolver key mismatch |
+| `NotImplemented` | stubbed instruction or invalid enum value |
+
+<Note>
+A build detail worth knowing: the `SettleMatch` account context is `Box`ed because it
+otherwise overflowed the 4&nbsp;KB BPF stack frame by 64 bytes — a failure that only
+surfaces at `cargo build-sbf`, never at `cargo check`.
+</Note>

@@ -2,11 +2,13 @@ import type {
   Book,
   BookLevel,
   Fill,
+  Lineups,
   Market,
   Match,
   Portfolio,
   Settlement,
   Side,
+  TeamMatchStats,
 } from "./types";
 
 export const explorerTx = (sig: string) =>
@@ -111,10 +113,19 @@ interface WireMatch {
   away: string;
   kickoff_at: string;
   status: "scheduled" | "live" | "finished";
-  live_state: { minute?: number; home_goals?: number; away_goals?: number };
+  live_state: {
+    minute?: number;
+    period?: string;
+    home_goals?: number;
+    away_goals?: number;
+    possession?: { home: number; away: number };
+    stats?: { home: TeamMatchStats; away: TeamMatchStats };
+  };
+  lineups?: Lineups | null;
 }
 
 export function mapMatch(w: WireMatch): Match {
+  const ls = w.live_state ?? {};
   return {
     id: w.id,
     fixture_id: w.fixture_id,
@@ -123,11 +134,15 @@ export function mapMatch(w: WireMatch): Match {
     kickoff_at: w.kickoff_at,
     status: w.status === "finished" ? "ft" : w.status,
     live_state: {
-      minute: w.live_state?.minute,
-      period: w.status === "finished" ? "FT" : undefined,
-      home_score: w.live_state?.home_goals ?? 0,
-      away_score: w.live_state?.away_goals ?? 0,
+      minute: ls.minute,
+      period: ls.period ?? (w.status === "finished" ? "FT" : undefined),
+      home_score: ls.home_goals ?? 0,
+      away_score: ls.away_goals ?? 0,
+      possession: ls.possession,
+      stats: ls.stats,
     },
+    // 'null' JSONB deserializes to null; normalize to undefined-ish for the UI.
+    lineups: w.lineups ?? null,
   };
 }
 
@@ -203,6 +218,26 @@ export interface RFQ {
   status: string;
 }
 
+export interface OpenRFQLeg {
+  market_id: string;
+  outcome: number; // 0 = NO, 1 = YES
+  title: string;
+}
+export interface OpenRFQ {
+  id: string;
+  taker: string;
+  stake: number; // micro-USDC the taker staked
+  legs: OpenRFQLeg[];
+  created_at: string;
+}
+interface WireOpenRFQ {
+  id: string;
+  taker: string;
+  stake: number;
+  legs: { market_id: string; outcome: number }[];
+  created_at: string;
+}
+
 // ---- client -----------------------------------------------------------------
 
 export const api = {
@@ -226,11 +261,19 @@ export const api = {
   },
 
   async getMatch(matchId: string): Promise<Match> {
-    return get<Match, { matches: WireMatch[] | null }>(`/matches`, (w) => {
-      const m = (w.matches ?? []).find((x) => x.id === matchId);
-      if (!m) throw new ApiError(404, "match not found");
-      return mapMatch(m);
-    });
+    // Full detail (live_state + team sheets) from the dedicated route. Fall back
+    // to the list endpoint if the backend predates that route (404) — the market
+    // page still loads, just without lineups/stats until the backend redeploys.
+    try {
+      return await get<Match, WireMatch>(`/matches/${matchId}`, mapMatch);
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.status !== 404) throw e;
+      return get<Match, { matches: WireMatch[] | null }>(`/matches`, (w) => {
+        const m = (w.matches ?? []).find((x) => x.id === matchId);
+        if (!m) throw new ApiError(404, "match not found");
+        return mapMatch(m);
+      });
+    }
   },
 
   async getBook(id: string): Promise<Book> {
@@ -296,7 +339,15 @@ export const api = {
   },
 
   async getPortfolio(wallet: string | null): Promise<Portfolio> {
-    if (!wallet) return { balance_micro: 0, positions: [], orders: [], history: [] };
+    if (!wallet)
+      return {
+        balance_micro: 0,
+        positions: [],
+        orders: [],
+        history: [],
+        precision: [],
+        combos: [],
+      };
     // Titles come from the markets list — one extra call, joined client-side.
     const titles = new Map<string, string>();
     try {
@@ -333,6 +384,28 @@ export const api = {
             }[]
           | null;
         fills: WireFill[] | null;
+        precision:
+          | {
+              market_id: string;
+              title: string;
+              status: Market["status"];
+              guess: number;
+              stake: number;
+              score?: number;
+              payout?: number;
+            }[]
+          | null;
+        combos:
+          | {
+              quote_hash: string;
+              status: "accepted" | "won" | "lost" | "void";
+              legs: number;
+              leg_details?: { market_id: string; outcome: number }[];
+              stake: number;
+              payout: number;
+              resolve_tx?: string;
+            }[]
+          | null;
       }
     >(`/portfolio?wallet=${encodeURIComponent(wallet)}`, (w) => ({
       balance_micro: w.balance?.usdc_available ?? 0,
@@ -368,6 +441,27 @@ export const api = {
         size: f.size,
         ts: Date.parse(f.ts) || Date.now(),
         tx: f.settle_tx ?? "",
+      })),
+      precision: (w.precision ?? []).map((p) => ({
+        market_id: p.market_id,
+        title: p.title,
+        status: p.status,
+        guess: p.guess,
+        stake_micro: p.stake,
+        score: p.score,
+        payout_micro: p.payout,
+      })),
+      combos: (w.combos ?? []).map((c) => ({
+        quote_hash: c.quote_hash,
+        status: c.status,
+        legs: c.legs,
+        legDetails: (c.leg_details ?? []).map((l) => ({
+          outcome: l.outcome,
+          title: titles.get(l.market_id) ?? shortId(l.market_id),
+        })),
+        stake_micro: c.stake,
+        payout_micro: c.payout,
+        resolve_tx: c.resolve_tx,
       })),
     }));
   },
@@ -440,7 +534,12 @@ export const api = {
   },
 
   async leaderboard(marketId: string): Promise<{ entries: PrecisionEntry[]; status: string }> {
-    return get(`/markets/${marketId}/precision/leaderboard`);
+    // An empty pool comes back as {entries: null} (Go nil slice → JSON null);
+    // coerce to [] so consumers can .reduce/.some/.map safely.
+    const r = await get<{ entries: PrecisionEntry[] | null; status: string }>(
+      `/markets/${marketId}/precision/leaderboard`,
+    );
+    return { entries: r.entries ?? [], status: r.status };
   },
 
   // ---- combos (RFQ) ----
@@ -457,6 +556,44 @@ export const api = {
       quote_hash: quoteHash,
       taker,
     });
+  },
+
+  // Market-maker view: open RFQs awaiting a quote (titles joined client-side).
+  async listOpenRFQs(): Promise<OpenRFQ[]> {
+    const titles = new Map<string, string>();
+    try {
+      for (const m of await this.listMarkets()) titles.set(m.market_id, m.title);
+    } catch {
+      /* still renders with ids */
+    }
+    const r = await get<{ rfqs: WireOpenRFQ[] | null }>(`/combos`);
+    return (r.rfqs ?? []).map((rq) => ({
+      id: rq.id,
+      taker: rq.taker,
+      stake: rq.stake,
+      created_at: rq.created_at,
+      legs: (rq.legs ?? []).map((l) => ({
+        market_id: l.market_id,
+        outcome: l.outcome,
+        title: titles.get(l.market_id) ?? shortId(l.market_id),
+      })),
+    }));
+  },
+
+  // Submit a signed ComboQuote as a market maker (sig over borshComboQuote).
+  async submitQuote(
+    rfqId: string,
+    q: {
+      maker: string;
+      legs: { market_id: string; outcome: number }[];
+      stake: number;
+      payout: number;
+      expiry: number;
+      salt: number;
+      sig: string;
+    },
+  ): Promise<{ quote_hash: string }> {
+    return post(`/combos/${rfqId}/quotes`, q);
   },
 };
 

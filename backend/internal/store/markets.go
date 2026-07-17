@@ -16,6 +16,17 @@ type MatchRow struct {
 	KickoffAt time.Time `json:"kickoff_at"`
 	Status    string    `json:"status"`
 	LiveState []byte    `json:"live_state"` // raw JSONB
+	Lineups   []byte    `json:"lineups"`    // raw JSONB team sheets ('null' when unset)
+}
+
+// matchCols is the shared SELECT list for MatchRow (lineups is nullable; coalesce
+// so scans never see SQL NULL). Prefix with a table alias via matchColsAliased.
+const matchCols = `id, txodds_fixture_id, home, away, kickoff_at, status, live_state, COALESCE(lineups, 'null'::jsonb)`
+
+func scanMatch(row pgx.Row) (MatchRow, error) {
+	var m MatchRow
+	err := row.Scan(&m.ID, &m.FixtureID, &m.Home, &m.Away, &m.KickoffAt, &m.Status, &m.LiveState, &m.Lineups)
+	return m, err
 }
 
 type MarketRow struct {
@@ -63,11 +74,18 @@ func (s *Store) SetMatchState(ctx context.Context, fixtureID, status string, liv
 }
 
 func (s *Store) GetMatchByFixture(ctx context.Context, fixtureID string) (MatchRow, error) {
-	var m MatchRow
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, txodds_fixture_id, home, away, kickoff_at, status, live_state
-		FROM matches WHERE txodds_fixture_id = $1`, fixtureID).
-		Scan(&m.ID, &m.FixtureID, &m.Home, &m.Away, &m.KickoffAt, &m.Status, &m.LiveState)
+	m, err := scanMatch(s.pool.QueryRow(ctx,
+		`SELECT `+matchCols+` FROM matches WHERE txodds_fixture_id = $1`, fixtureID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return m, ErrNotFound
+	}
+	return m, err
+}
+
+// GetMatchByID fetches one match by its UUID id (the /matches/{id} detail route).
+func (s *Store) GetMatchByID(ctx context.Context, id string) (MatchRow, error) {
+	m, err := scanMatch(s.pool.QueryRow(ctx,
+		`SELECT `+matchCols+` FROM matches WHERE id = $1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return m, ErrNotFound
 	}
@@ -75,22 +93,35 @@ func (s *Store) GetMatchByFixture(ctx context.Context, fixtureID string) (MatchR
 }
 
 func (s *Store) ListMatches(ctx context.Context) ([]MatchRow, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, txodds_fixture_id, home, away, kickoff_at, status, live_state
-		FROM matches ORDER BY kickoff_at`)
+	rows, err := s.pool.Query(ctx, `SELECT `+matchCols+` FROM matches ORDER BY kickoff_at`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []MatchRow
 	for rows.Next() {
-		var m MatchRow
-		if err := rows.Scan(&m.ID, &m.FixtureID, &m.Home, &m.Away, &m.KickoffAt, &m.Status, &m.LiveState); err != nil {
+		m, err := scanMatch(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// SetMatchLineups persists a fixture's team sheets (feed EventLineup). Static per
+// match, so stored separately from the per-tick live_state.
+func (s *Store) SetMatchLineups(ctx context.Context, fixtureID string, lineups []byte) error {
+	ls := string(lineups)
+	res, err := s.pool.Exec(ctx,
+		`UPDATE matches SET lineups = $2::jsonb WHERE txodds_fixture_id = $1`, fixtureID, ls)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // UnresolvedMatches returns matches kicked off before `olderThan` that still have
@@ -99,7 +130,7 @@ func (s *Store) ListMatches(ctx context.Context) ([]MatchRow, error) {
 // bounded, usually-empty set (only past-kickoff matches with open markets).
 func (s *Store) UnresolvedMatches(ctx context.Context, olderThan time.Time) ([]MatchRow, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT m.id, m.txodds_fixture_id, m.home, m.away, m.kickoff_at, m.status, m.live_state
+		SELECT `+matchCols+`
 		FROM matches m
 		WHERE m.kickoff_at < $1
 		  AND EXISTS (SELECT 1 FROM markets mk
@@ -111,8 +142,8 @@ func (s *Store) UnresolvedMatches(ctx context.Context, olderThan time.Time) ([]M
 	defer rows.Close()
 	var out []MatchRow
 	for rows.Next() {
-		var m MatchRow
-		if err := rows.Scan(&m.ID, &m.FixtureID, &m.Home, &m.Away, &m.KickoffAt, &m.Status, &m.LiveState); err != nil {
+		m, err := scanMatch(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, m)

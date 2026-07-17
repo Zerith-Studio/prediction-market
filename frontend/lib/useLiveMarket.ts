@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, configured, mapBook, mapMatch, wsUrl, type WireBook } from "./api";
-import type { Book, Fill, Market, Match } from "./types";
+import type { Book, Fill, Lineups, Market, Match, TeamMatchStats } from "./types";
+
+// The score-tick shape carried by a match_state WS event's payload (mirrors the
+// backend scorePayload); a "lineup" event instead carries a Lineups object.
+type ScoreTick = {
+  minute?: number;
+  period?: string;
+  home_goals?: number;
+  away_goals?: number;
+  possession?: { home: number; away: number };
+  stats?: { home: TeamMatchStats; away: TeamMatchStats };
+};
 
 export interface PricePoint {
   t: number; // unix ms
@@ -31,6 +42,77 @@ function midOf(book: Book, fallback: number): number {
   return book.bids[0] && book.asks[0]
     ? Math.round((book.bids[0].price + book.asks[0].price) / 2)
     : book.bids[0]?.price ?? book.asks[0]?.price ?? fallback;
+}
+
+/**
+ * Reconstructs the initial chart series from the market's real fills so the
+ * graph survives a reload instead of collapsing to a flat line at the current
+ * price. Each fill is a YES-cents price at a timestamp; the backend returns
+ * them newest-first, but the chart reads left→right (oldest→newest) and pins
+ * the live mid as the trailing "now" point. With no fills we fall back to a
+ * flat two-point line at the mid (the chart needs ≥2 points to render).
+ */
+function seedHistory(fills: Fill[], mid: number): PricePoint[] {
+  const pts = fills
+    .map((f) => ({ t: f.ts, price: f.price }))
+    .sort((a, b) => a.t - b.t);
+  pts.push({ t: Date.now(), price: mid });
+  if (pts.length < 2) {
+    return [
+      { t: Date.now() - 60_000, price: mid },
+      { t: Date.now(), price: mid },
+    ];
+  }
+  return pts.slice(-120);
+}
+
+// The backend has no mid-price time-series — /fills only records trades, not
+// the resting-order book moves that also shift the YES mid (and drive the live
+// chart). So we persist the series the user is actually watching, keyed per
+// market, and restore it on reload. Fills still seed a first-ever visit.
+const HISTORY_CAP = 120;
+const historyKey = (marketId: string) => `pm:chart:${marketId}`;
+
+function loadStoredHistory(marketId: string): PricePoint[] | null {
+  try {
+    const raw = window.localStorage.getItem(historyKey(marketId));
+    if (!raw) return null;
+    const pts = JSON.parse(raw);
+    if (!Array.isArray(pts)) return null;
+    const clean = pts.filter(
+      (p): p is PricePoint =>
+        p && typeof p.t === "number" && typeof p.price === "number"
+    );
+    return clean.length ? clean : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredHistory(marketId: string, pts: PricePoint[]): void {
+  try {
+    window.localStorage.setItem(
+      historyKey(marketId),
+      JSON.stringify(pts.slice(-HISTORY_CAP))
+    );
+  } catch {
+    /* private mode / quota exceeded — the chart still works in-memory */
+  }
+}
+
+/**
+ * Restores the chart series on load: the user's own persisted series wins (it
+ * captures book-driven mid moves, not just trades), pinned to the current mid
+ * as the trailing point; otherwise we reconstruct from real fills.
+ */
+function restoreHistory(marketId: string, fills: Fill[], mid: number): PricePoint[] {
+  const stored = loadStoredHistory(marketId);
+  if (stored && stored.length >= 2) {
+    const last = stored[stored.length - 1];
+    const pts = last.price === mid ? stored : [...stored, { t: Date.now(), price: mid }];
+    return pts.slice(-HISTORY_CAP);
+  }
+  return seedHistory(fills, mid);
 }
 
 /**
@@ -82,6 +164,7 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
         ]);
         if (!alive) return;
         const mid = midOf(book, 50);
+        const history = restoreHistory(marketId, fills, mid);
         setState((s) => ({
           ...s,
           loading: false,
@@ -90,12 +173,9 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
           book,
           fills,
           oneliners,
-          history: [
-            { t: Date.now() - 1000, price: mid },
-            { t: Date.now(), price: mid },
-          ],
+          history,
           yesPrice: mid,
-          priceDelta: 0,
+          priceDelta: mid - history[0].price,
           balanceMicro,
         }));
       } catch (e) {
@@ -171,12 +251,13 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
           break;
         }
         case "match_state": {
-          const d = ev.data as {
-            event?: string;
-            payload?: { minute?: number; home_goals?: number; away_goals?: number };
-          };
+          const d = ev.data as { event?: string; payload?: ScoreTick | Lineups };
           setState((s) => {
             if (!s.match) return s;
+            // Team sheets arrive on their own match_state sub-event.
+            if (d.event === "lineup") {
+              return { ...s, match: { ...s.match, lineups: (d.payload as Lineups) ?? s.match.lineups } };
+            }
             const finished = d.event === "full_time";
             return {
               ...s,
@@ -187,7 +268,8 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
                 away: s.match.away,
                 kickoff_at: s.match.kickoff_at,
                 status: finished ? "finished" : "live",
-                live_state: d.payload ?? {},
+                live_state: (d.payload ?? {}) as ScoreTick,
+                lineups: s.match.lineups, // carry sheets across score ticks
               }),
             };
           });
@@ -218,6 +300,14 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
       ws?.close();
     };
   }, [marketId, state.loading, state.errorStatus]);
+
+  // persist the price series so a reload restores the graph the user was
+  // watching (mid moves from resting orders never touch /fills, so this is the
+  // only record of them client-side).
+  useEffect(() => {
+    if (state.loading || state.errorStatus) return;
+    saveStoredHistory(marketId, state.history);
+  }, [marketId, state.history, state.loading, state.errorStatus]);
 
   // one-liner rotation
   useEffect(() => {

@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, configured } from "@/lib/api";
+import { kindOf } from "@/lib/kinds";
 import type { Market, Match } from "@/lib/types";
 import { TopBar } from "@/components/TopBar";
+import { FlagPair } from "@/components/TeamFlag";
 import { usePitchWallet } from "@/lib/wallet";
 
 export default function MarketsIndex() {
@@ -85,9 +87,12 @@ function MatchSection({ match, markets }: { match: Match; markets: Market[] }) {
 
   return (
     <section className="rule-t py-6">
-      <div className="mb-4 flex items-baseline justify-between gap-4">
-        <h2 className="min-w-0 truncate text-[17px] font-bold tracking-tight">
-          {match.home} <span className="font-normal text-dim">vs</span> {match.away}
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <h2 className="flex min-w-0 items-center gap-2.5 text-[17px] font-bold tracking-tight">
+          <FlagPair home={match.home} away={match.away} size={22} />
+          <span className="min-w-0 truncate">
+            {match.home} <span className="font-normal text-dim">vs</span> {match.away}
+          </span>
         </h2>
         <span className="shrink-0 font-mono text-[11px] tracking-[0.1em]">
           {live ? (
@@ -113,12 +118,15 @@ function MatchSection({ match, markets }: { match: Match; markets: Market[] }) {
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {binaries.map((m) => (
-          <BinaryCard key={m.market_id} m={m} />
+          <BinaryCard key={m.market_id} m={m} match={match} />
         ))}
         {pools.map((m) => (
           <Link key={m.market_id} href={`/precision/${m.market_id}`} className={cardLink}>
-            <span className="line-clamp-2 text-[13.5px] leading-snug text-ink transition-colors group-hover:text-accent">
-              {m.title}
+            <span className="flex items-start gap-2.5">
+              <FlagPair home={match.home} away={match.away} size={18} />
+              <span className="line-clamp-2 min-w-0 text-[13.5px] leading-snug text-ink transition-colors group-hover:text-accent">
+                {m.title}
+              </span>
             </span>
             <div className="mt-3 flex items-center justify-between">
               <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
@@ -149,15 +157,16 @@ const noBtn =
 
 // BinaryCard: open markets carry Yes/No buttons that deep-link into the trade
 // panel with the outcome preselected; resolved markets show the result instead.
-function BinaryCard({ m }: { m: Market }) {
+function BinaryCard({ m, match }: { m: Market; match: Match }) {
   if (m.status === "open") {
     return (
       <div className={cardBox}>
         <Link
           href={`/market/${m.market_id}`}
-          className="line-clamp-2 text-[13.5px] leading-snug text-ink transition-colors hover:text-accent"
+          className="flex items-start gap-2.5 text-ink transition-colors hover:text-accent"
         >
-          {m.title}
+          <FlagPair home={match.home} away={match.away} size={18} />
+          <span className="line-clamp-2 min-w-0 text-[13.5px] leading-snug">{m.title}</span>
         </Link>
         <div className="mt-3 flex items-center justify-between gap-2">
           <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
@@ -177,8 +186,11 @@ function BinaryCard({ m }: { m: Market }) {
   }
   return (
     <Link href={`/market/${m.market_id}`} className={cardLink}>
-      <span className="line-clamp-2 text-[13.5px] leading-snug text-ink transition-colors group-hover:text-accent">
-        {m.title}
+      <span className="flex items-start gap-2.5">
+        <FlagPair home={match.home} away={match.away} size={18} />
+        <span className="line-clamp-2 min-w-0 text-[13.5px] leading-snug text-ink transition-colors group-hover:text-accent">
+          {m.title}
+        </span>
       </span>
       <div className="mt-3 flex items-center justify-between">
         <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
@@ -188,23 +200,6 @@ function BinaryCard({ m }: { m: Market }) {
       </div>
     </Link>
   );
-}
-
-// Short human label per template — the card's meta line.
-const KIND: Record<string, string> = {
-  home_win: "Match result",
-  draw: "Match result",
-  away_win: "Match result",
-  dnb_home: "Draw no bet",
-  over_2_5: "Total goals",
-  btts: "Both to score",
-  ou_1h_075: "First half",
-  precision_total_goals: "Precision",
-  precision_total_passes: "Precision",
-};
-
-function kindOf(m: Market): string {
-  return KIND[m.template_key] ?? m.type;
 }
 
 function MarketState({ market }: { market: Market }) {

@@ -39,9 +39,10 @@ type Server struct {
 	hub       *ws.Hub
 	rfq       *rfq.Service
 	lifecycle *lifecycle.Service
-	chain     *crank.ChainOps // nil = off-chain mirror mode
-	fixtures  FixtureSource   // nil = admin fixture browser disabled
-	admin     *adminAuth      // operator-wallet gate for /admin (nil until WithAdmin)
+	chain     *crank.ChainOps        // nil = off-chain mirror mode
+	fixtures  FixtureSource          // nil = admin fixture browser disabled
+	admin     *adminAuth             // operator-wallet gate for /admin (nil until WithAdmin)
+	pricer    lifecycle.FairPriceSink // MM bot's fair-price sink (admin manual pricing); nil = disabled
 	log       *slog.Logger
 }
 
@@ -66,6 +67,13 @@ func (s *Server) WithFixtures(src FixtureSource) *Server {
 // adminPubkeyB58 (base58). An empty pubkey leaves /admin returning 503.
 func (s *Server) WithAdmin(adminPubkeyB58 string) *Server {
 	s.admin = newAdminAuth(adminPubkeyB58)
+	return s
+}
+
+// WithPricer lets the admin panel push a manual fair price to the MM bot (which
+// then quotes that market two-sided and can answer combos on it). nil disables.
+func (s *Server) WithPricer(p lifecycle.FairPriceSink) *Server {
+	s.pricer = p
 	return s
 }
 
@@ -102,6 +110,7 @@ func (s *Server) Routes() *http.ServeMux {
 
 	// Markets & matches
 	mux.HandleFunc("GET /matches", s.handleListMatches)
+	mux.HandleFunc("GET /matches/{id}", s.handleGetMatch)
 	mux.HandleFunc("GET /markets", s.handleListMarkets)
 	mux.HandleFunc("GET /markets/{id}", s.handleGetMarket)
 	mux.HandleFunc("GET /markets/{id}/book", s.handleGetBook)
@@ -111,6 +120,7 @@ func (s *Server) Routes() *http.ServeMux {
 
 	// Combos (RFQ)
 	mux.HandleFunc("POST /combos", s.handleCreateRFQ)
+	mux.HandleFunc("GET /combos", s.handleListRFQs)
 	mux.HandleFunc("GET /combos/{id}", s.handleGetRFQ)
 	mux.HandleFunc("POST /combos/{id}/quotes", s.handleSubmitQuote)
 	mux.HandleFunc("POST /combos/{id}/accept", s.handleAcceptQuote)
@@ -137,6 +147,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /admin/markets/{id}/resolve", s.adminGuard(s.handleAdminResolveMarket))
 	mux.HandleFunc("POST /admin/markets/{id}/close", s.adminGuard(s.handleAdminCloseMarket))
 	mux.HandleFunc("POST /admin/markets/{id}/cancel-orders", s.adminGuard(s.handleAdminCancelOrders))
+	mux.HandleFunc("POST /admin/markets/{id}/price", s.adminGuard(s.handleAdminSetPrice))
 	mux.HandleFunc("GET /admin/ops", s.adminGuard(s.handleAdminOps))
 
 	// Ops
@@ -285,13 +296,38 @@ func (s *Server) handleListMatches(w http.ResponseWriter, r *http.Request) {
 func marshalMatches(matches []store.MatchRow) []map[string]any {
 	out := make([]map[string]any, len(matches))
 	for i, m := range matches {
-		out[i] = map[string]any{
-			"id": m.ID, "fixture_id": m.FixtureID, "home": m.Home, "away": m.Away,
-			"kickoff_at": m.KickoffAt, "status": m.Status,
-			"live_state": json.RawMessage(m.LiveState),
-		}
+		out[i] = matchJSON(m, false)
 	}
 	return out
+}
+
+// matchJSON builds a match DTO. The list view stays lean; the detail view
+// (withLineups) also carries the team sheets, which can be large.
+func matchJSON(m store.MatchRow, withLineups bool) map[string]any {
+	out := map[string]any{
+		"id": m.ID, "fixture_id": m.FixtureID, "home": m.Home, "away": m.Away,
+		"kickoff_at": m.KickoffAt, "status": m.Status,
+		"live_state": json.RawMessage(m.LiveState),
+	}
+	if withLineups {
+		out["lineups"] = json.RawMessage(m.Lineups) // 'null' when the feed hasn't sent them
+	}
+	return out
+}
+
+// handleGetMatch returns one match's full detail (live_state + team sheets) by
+// its UUID id — the /market page's match-centre source.
+func (s *Server) handleGetMatch(w http.ResponseWriter, r *http.Request) {
+	m, err := s.store.GetMatchByID(r.Context(), r.PathValue("id"))
+	if errors.Is(err, store.ErrNotFound) {
+		httpError(w, http.StatusNotFound, "match not found")
+		return
+	}
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, matchJSON(m, true))
 }
 
 func marketJSON(m store.MarketRow) map[string]any {
@@ -448,6 +484,28 @@ func (s *Server) handleCreateRFQ(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rfq_id": id})
+}
+
+// handleListRFQs lists open RFQs awaiting a quote — the market-maker view
+// (a human MM answers these through the same POST /combos/{id}/quotes the bot uses).
+func (s *Server) handleListRFQs(w http.ResponseWriter, r *http.Request) {
+	rfqs, err := s.store.OpenRFQs(r.Context())
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := make([]map[string]any, len(rfqs))
+	for i, rq := range rfqs {
+		legs := make([]map[string]any, len(rq.Legs))
+		for j, l := range rq.Legs {
+			legs[j] = map[string]any{"market_id": models.HashString(l.MarketID), "outcome": l.Outcome}
+		}
+		out[i] = map[string]any{
+			"id": rq.ID, "taker": rq.Taker, "stake": rq.Stake,
+			"legs": legs, "status": rq.Status, "created_at": rq.CreatedAt,
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rfqs": out})
 }
 
 func (s *Server) handleGetRFQ(w http.ResponseWriter, r *http.Request) {
@@ -783,11 +841,40 @@ func (s *Server) handlePortfolio(w http.ResponseWriter, r *http.Request) {
 	}
 	escOut := make([]map[string]any, len(escrows))
 	for i, e := range escrows {
+		legDetails := make([]map[string]any, len(e.LegDetails))
+		for j, l := range e.LegDetails {
+			legDetails[j] = map[string]any{
+				"market_id": models.HashString(l.MarketID), "outcome": l.Outcome,
+			}
+		}
 		escOut[i] = map[string]any{
 			"quote_hash": models.HashString(e.QuoteHash),
 			"taker":      e.Taker, "status": e.Status,
-			"accept_tx": e.AcceptTx, "resolve_tx": e.ResolveTx,
+			"stake": e.Stake, "payout": e.Payout, "legs": e.Legs,
+			"leg_details": legDetails,
+			"accept_tx":   e.AcceptTx, "resolve_tx": e.ResolveTx,
 		}
+	}
+
+	precEntries, err := s.store.PrecisionEntriesForWallet(ctx, wallet)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	precOut := make([]map[string]any, len(precEntries))
+	for i, p := range precEntries {
+		row := map[string]any{
+			"market_id": models.HashString(p.MarketID),
+			"title":     p.Title, "status": p.Status,
+			"guess": p.Guess, "stake": p.Stake, "ts": p.TS,
+		}
+		if p.Score != nil {
+			row["score"] = *p.Score
+		}
+		if p.Payout != nil {
+			row["payout"] = *p.Payout
+		}
+		precOut[i] = row
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -796,6 +883,7 @@ func (s *Server) handlePortfolio(w http.ResponseWriter, r *http.Request) {
 		"orders":    ordOut,
 		"fills":     fills,
 		"combos":    escOut,
+		"precision": precOut,
 	})
 }
 

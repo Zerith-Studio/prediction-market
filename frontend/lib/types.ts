@@ -9,6 +9,38 @@ export type MarketStatus =
   | "settled"
   | "void";
 
+// Per-team live match stats (TxLINE scores feed). Only fields the feed actually
+// carries are present; absent stats are simply not rendered.
+export interface TeamMatchStats {
+  yellow?: number;
+  red?: number;
+  corners?: number;
+  shots?: number;
+  shots_on?: number;
+}
+
+// One squad member. number + name are always present; position is "" when the
+// feed's position code isn't mapped (we never fabricate a label).
+export interface LineupPlayer {
+  number: string;
+  name: string;
+  position?: string;
+  unit: number; // line grouping: lower = own goal, higher = attack
+  captain?: boolean;
+}
+
+export interface TeamLineup {
+  team: string;
+  formation?: string; // derived from unit counts; may be absent
+  starters: LineupPlayer[];
+  subs: LineupPlayer[];
+}
+
+export interface Lineups {
+  home?: TeamLineup;
+  away?: TeamLineup;
+}
+
 export interface Match {
   id: string;
   fixture_id: string;
@@ -21,7 +53,10 @@ export interface Match {
     period?: string; // "1H" | "HT" | "2H" | "FT"
     home_score?: number;
     away_score?: number;
+    possession?: { home: number; away: number };
+    stats?: { home: TeamMatchStats; away: TeamMatchStats };
   };
+  lineups?: Lineups | null; // present from the /matches/{id} detail route
 }
 
 export interface Market {
@@ -112,9 +147,31 @@ export interface HistoryFill {
   tx: string;
 }
 
+export interface PrecisionResult {
+  market_id: string;
+  title: string;
+  status: MarketStatus;
+  guess: number;
+  stake_micro: number;
+  score?: number; // 0..1, present once settled
+  payout_micro?: number; // present once settled/won
+}
+
+export interface ComboResult {
+  quote_hash: string;
+  status: "accepted" | "won" | "lost" | "void";
+  legs: number;
+  legDetails: { title: string; outcome: number }[]; // the actual legs
+  stake_micro: number;
+  payout_micro: number;
+  resolve_tx?: string;
+}
+
 export interface Portfolio {
   balance_micro: number;
   positions: Position[];
   orders: OpenOrder[];
   history: HistoryFill[];
+  precision: PrecisionResult[];
+  combos: ComboResult[];
 }

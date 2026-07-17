@@ -1,0 +1,41 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "PitchMarket",
+  "description": "Football prediction exchange on Solana — off-chain matching, on-chain non-custodial settlement.",
+  "colors": {
+    "primary": "#16A34A",
+    "light": "#22C55E",
+    "dark": "#15803D"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Getting started",
+        "pages": ["index", "architecture", "setup"]
+      },
+      {
+        "group": "Concepts",
+        "pages": ["concepts/matching", "concepts/trust-model"]
+      },
+      {
+        "group": "On-chain program",
+        "pages": ["onchain/program", "onchain/signed-messages"]
+      },
+      {
+        "group": "API",
+        "pages": ["api/rest", "api/websocket"]
+      },
+      {
+        "group": "Reference",
+        "pages": ["reference/adrs", "reference/status"]
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Zerith-Studio"
+    }
+  }
+}

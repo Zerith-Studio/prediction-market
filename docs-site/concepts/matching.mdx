@@ -1,0 +1,79 @@
+---
+title: "Matching engine"
+description: "The fully-collateralized CTF model and the three match types: NORMAL, MINT, MERGE."
+---
+
+PitchMarket adopts Polymarket's Conditional Token Framework (CTF) model verbatim
+(ADR 0002): a fully-collateralized binary market, **not** a margin venue. No naked
+shorts, no leverage, no negative balances.
+
+## Primitives
+
+- Collateral is USDC (integer **micro-USDC** on-chain, 1 USDC = 1,000,000; the UI shows
+  cents). Prices are integers **1..99** (¢, the implied probability of the outcome).
+- Each market has two complementary SPL outcome tokens, YES and NO.
+- **Complete-set invariant:** `1 YES + 1 NO ⇄ $1`, always. Split $1 → mint a YES+NO
+  pair; merge a pair → $1. Prices sum to $1 (a 60¢ YES implies a 40¢ NO).
+
+## BUY vs SELL
+
+A side is defined by which asset the maker provides:
+
+| Side | Provides | Receives | Locked at entry |
+|---|---|---|---|
+| BUY | USDC | outcome tokens | `price × size (+ fee)` USDC |
+| SELL | outcome tokens | USDC | `size` tokens of that outcome |
+
+Entry-time collateral is enforced with no exceptions: a SELL for tokens you don't hold
+is rejected at the API — there is no naked-short path. To take the bearish side you BUY
+NO, which locks USDC.
+
+## The three match types
+
+The engine runs a **unified ladder** with price-time priority across all resting
+populations. Three pairings settle a trade:
+
+| Match type | Pairs | Effect |
+|---|---|---|
+| **NORMAL** | BUY vs SELL, same outcome | Direct swap: tokens to the buyer, USDC to the seller. No mint or burn. |
+| **MINT** | BUY YES + BUY NO (prices sum ≥ 100¢) | The two buyers' collateral is combined, $1 is split into a fresh YES+NO pair, one token to each buyer. Collateral lands in the market pool. |
+| **MERGE** | SELL YES + SELL NO (prices sum ≤ 100¢) | Both tokens are collected and burned as a complete set; the pooled $1 of collateral is released to the two sellers. |
+
+A single taker order may fill against NORMAL makers and MINT makers in one match, but
+never MINT and MERGE together. Nobody is ever handed the opposite leg by surprise — you
+hold NO only if you explicitly bought NO.
+
+<Warning>
+**Money moves differently per match type.** NORMAL settles at the engine's `fill_price`.
+MINT and MERGE move money at **each order's own limit price** (see `settle_mint` /
+`settle_merge` in `programs/pitchmarket/src/lib.rs`). The Go store's `legDeltaFor`
+mirrors this exactly; the two must stay in lockstep.
+</Warning>
+
+## Why the book is provably solvent
+
+Solvency is structural, not a bolted-on guard (ADR 0002):
+
+- Every share is prepaid: a YES+NO set exists only because $1 was deposited via a
+  split, and is destroyed only by a merge or redemption paying $1 back.
+- Collateral is escrowed at mint/fill time; winners `redeem` against escrow, not
+  against a possibly-insolvent counterparty.
+- The book is 100% collateralized by construction; payouts cannot bounce. Maximum loss
+  is exactly the price prepaid.
+
+## The unified YES ladder
+
+The book is stored per outcome, but the frontend renders one unified YES ladder: a bid
+for NO at price *p* is equivalent to an ask for YES at *100 − p*. The mapping lives in
+`frontend/lib/api.ts` (`mapBook`) and its mobile port.
+
+## Beyond binary: combos and precision
+
+- **Combos (RFQ)** — a parlay is a binary complete set over the derived condition
+  `C = AND(legs)` (ADR 0004). MMs sign contingent quotes off-chain; accepting escrows
+  the full pot. Quotes are single-use (hash-marked salt) and grouped into **mutex
+  groups** so contradictory legs can't be combined.
+- **Precision pools** — pool-based scalar guesses (no order book): payout
+  `= Pool × (stakeᵢ·scoreᵢ)/Σ(stake·score)` with a σ-normalized closeness score
+  `1 / (1 + |guess − actual| / s)^k`, k=2. Entry locks at kickoff, one entry per wallet,
+  plus a rake — the anti-gaming triad of ADR 0006.

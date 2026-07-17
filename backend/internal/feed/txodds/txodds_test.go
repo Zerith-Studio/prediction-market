@@ -3,6 +3,7 @@ package txodds
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"testing"
 	"time"
 
@@ -141,6 +142,89 @@ func TestStatsOverrideActionCount(t *testing.T) {
 	// Stats say 2-1; the action-counter alone would have said 1-0.
 	if payload["home_goals"] != 2 || payload["away_goals"] != 1 {
 		t.Errorf("stats must win: %+v", payload)
+	}
+}
+
+// xi builds an 11-player starting lineup across 4 unit lines (GK=1, DEF=2×4,
+// MID=3×3, FWD=4×3) plus one substitute, so deriveFormation yields "4-3-3".
+func xi() []wirePlayerLineup {
+	units := []int{1, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4}
+	var out []wirePlayerLineup
+	for i, u := range units {
+		out = append(out, wirePlayerLineup{
+			RosterNumber: strconv.Itoa(i + 1), Starter: true, UnitID: u,
+			Player: struct {
+				PreferredName string `json:"preferredName"`
+				NormativeID   int64  `json:"normativeId"`
+			}{PreferredName: "Player " + strconv.Itoa(i+1)},
+		})
+	}
+	out = append(out, wirePlayerLineup{RosterNumber: "12", Starter: false, UnitID: 4,
+		Player: struct {
+			PreferredName string `json:"preferredName"`
+			NormativeID   int64  `json:"normativeId"`
+		}{PreferredName: "Sub One"}})
+	return out
+}
+
+func TestLineupEmit(t *testing.T) {
+	p := testProvider()
+	ch := subscribe(p, "18241006")
+	s := wireScore{FixtureID: 18241006, Participant1ID: 1888, Participant2ID: 1489, Participant1H: true,
+		Lineups: []wireLineupTeam{
+			{PreferredName: "Spain", NormativeID: 1888, Lineups: xi()},
+			{PreferredName: "Argentina", NormativeID: 1489, Lineups: xi()},
+		},
+	}
+	p.handleScore(s)
+
+	events := drain(ch)
+	if len(events) != 1 || events[0].Type != feed.EventLineup {
+		t.Fatalf("want 1 lineup event, got %+v", events)
+	}
+	lu := events[0].Payload.(*Lineups)
+	if lu.Home == nil || lu.Home.Team != "Spain" || len(lu.Home.Starters) != 11 || len(lu.Home.Subs) != 1 {
+		t.Fatalf("home lineup: %+v", lu.Home)
+	}
+	if lu.Away == nil || lu.Away.Team != "Argentina" {
+		t.Fatalf("away lineup: %+v", lu.Away)
+	}
+	if lu.Home.Formation != "4-3-3" {
+		t.Errorf("derived formation = %q, want 4-3-3", lu.Home.Formation)
+	}
+
+	// Team sheets emit exactly once — a later frame must not re-emit them.
+	p.handleScore(s)
+	if extra := drain(ch); len(extra) != 0 {
+		t.Errorf("lineups re-emitted: %+v", extra)
+	}
+}
+
+func TestLiveStatsPayload(t *testing.T) {
+	p := testProvider()
+	ch := subscribe(p, "9")
+	poss := 57
+	s := wireScore{FixtureID: 9, Participant1ID: 1, Participant2ID: 2, Participant1H: true,
+		Action:     "goal",
+		Data:       map[string]any{"ParticipantId": float64(1)},
+		Stats:      map[string]any{"1": float64(1), "3": float64(2), "7": float64(5), "4": float64(1), "8": float64(3)},
+		Possession: &poss,
+	}
+	p.handleScore(s)
+
+	pl := drain(ch)[0].Payload.(map[string]any)
+	stats := pl["stats"].(map[string]any)
+	home := stats["home"].(map[string]any)
+	if home["yellow"] != 2 || home["corners"] != 5 {
+		t.Errorf("home stats: %+v", home)
+	}
+	away := stats["away"].(map[string]any)
+	if away["yellow"] != 1 || away["corners"] != 3 {
+		t.Errorf("away stats: %+v", away)
+	}
+	poss2 := pl["possession"].(map[string]any)
+	if poss2["home"] != 57 || poss2["away"] != 43 {
+		t.Errorf("possession: %+v", poss2)
 	}
 }
 

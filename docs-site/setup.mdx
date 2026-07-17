@@ -1,0 +1,103 @@
+---
+title: "Setup & build"
+description: "Toolchain, build commands, and the verification gates — including the platform-tools trap."
+---
+
+Everything here is condensed from the repo's `CLAUDE.md` and `progress.md` §4 (the
+toolchain post-mortem). The repo layout:
+
+```
+programs/pitchmarket/   E1 — Anchor settlement program (Rust)
+backend/                E2 — Go matching engine, crank, feed, API
+frontend/               Next.js web app
+mobile/                 Expo (React Native) app
+docs/                   ADRs, interface contract, specs, handoff
+```
+
+## Quick commands
+
+```sh
+# Rust program — host check (fast, but does NOT prove BPF compiles)
+cargo check -p pitchmarket
+cargo test -p pitchmarket            # includes the borsh golden vectors
+
+# Rust program — the real build (see the toolchain warning below)
+cd programs/pitchmarket && cargo build-sbf
+
+# Go backend
+cd backend && go build ./... && go vet ./...
+go test -p 1 ./...                   # -p 1 matters: parallel packages contend on Neon
+
+# Frontend
+cd frontend && npm run build         # prebuild gate pins the TS borsh encoder
+
+# Program integration tests (local validator)
+npm test                             # tests/ — full lifecycle, 8 tests
+```
+
+<Warning>
+`cargo check` passing means very little for the on-chain program. **`cargo build-sbf` is
+the gate**, and deployment to devnet is the only thing that proves an instruction works.
+</Warning>
+
+## The toolchain trap (progress.md §4)
+
+The program requires **modern Agave platform-tools** (v1.54 / rustc 1.89, installed by
+Agave CLI 4.1.1 from `release.anza.xyz/stable/install`). The historical `anchor build`
+failure (`edition2024` parse errors) was caused entirely by old platform-tools v1.43.
+
+Two rules:
+
+1. **Build with `cargo build-sbf` from the program directory, not `anchor build`.**
+2. Any `anchor` CLI invocation (including `anchor idl build`) may silently re-install
+   Solana 2.1.0 and repoint `active_release` back to the old tools. After any `anchor`
+   command, repoint:
+
+```sh
+cd ~/.local/share/solana/install
+ln -sfn "$PWD/releases/stable-<hash>/solana-release" active_release && hash -r
+cargo-build-sbf --version   # must read platform-tools v1.54 / rustc 1.89
+```
+
+**IDL note:** `anchor idl build` chokes on the two `ostatus` PDAs whose seed is a
+function call on an instruction argument. Workaround: temporarily swap those seeds for a
+plain argument field to emit the IDL, then restore. The runtime `.so` keeps the real
+hash-based seeds.
+
+## Backend environment
+
+Go DB tests need `DATABASE_URL` (auto-read from the repo-root `.env`, gitignored — copy
+`.env.example`). Each test run creates a scratch database and drops it afterwards.
+They're slow against Neon (~300&nbsp;ms per statement) and occasionally network-flaky —
+a package failing with `dial error` / `no such host` is the network, not the code;
+re-run it. Scope test runs while iterating: `go test ./internal/matching/` is instant,
+`./internal/api/` takes ~3 minutes.
+
+pgx runs in the **simple query protocol** (Neon's pooler breaks prepared statements),
+which imposes three conventions: explicit `::bigint` casts in SQL arithmetic on
+parameters, JSONB parameters passed as Go `string` (never `[]byte`), and `uint64` salts
+scanned via `int64`.
+
+## Running the server
+
+```sh
+# Demo mode — off-chain mirror, no chain needed
+cd backend && DEMO_FIXTURE=demo-final go run ./cmd/server
+
+# On-chain mode — against the deployed devnet program
+SOLANA_RPC_URL=... OPERATOR_KEYPAIR=... go run ./cmd/server
+
+# Reproduce the full devnet floor proof (all balance assertions)
+go run ./cmd/devnet-e2e
+```
+
+See `backend/.env.example` for the full environment surface and
+[`docs/HANDOFF.md` §4](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/HANDOFF.md)
+for the complete runbooks.
+
+<Note>
+The program keypair (`target/deploy/pitchmarket-keypair.json`) is committed for this
+devnet-only hackathon deployment (decision closed 2026-07-12). Public devnet RPC
+rate-limits aggressive status polls — the crank and harness poll gently (1.5–2.5&nbsp;s);
+a transaction that "times out" usually landed (check `solana confirm`).
+</Note>
