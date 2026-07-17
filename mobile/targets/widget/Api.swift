@@ -36,6 +36,8 @@ struct WirePortfolio: Decodable {
         let best_bid: Double?
     }
     struct Order: Decodable {
+        let market_id: String?
+        let outcome: Double?   // 0 NO, 1 YES
         let side: Double?      // 0 buy, 1 sell
         let price: Double?
         let remaining: Double?
@@ -76,6 +78,14 @@ struct PositionCalc {
     let realizedMicro: Double
 }
 
+struct OrderCalc {
+    let title: String
+    let side: String    // "BUY" | "SELL"
+    let outcome: String // "YES" | "NO"
+    let price: Double   // cents
+    let remaining: Double
+}
+
 struct PortfolioSummary {
     let availableMicro: Double
     let valueMicro: Double
@@ -84,6 +94,7 @@ struct PortfolioSummary {
     let lockedMicro: Double
     let openOrders: Int
     let positions: [PositionCalc] // open only, sorted by valueMicro desc
+    let orders: [OrderCalc]       // live resting orders
 }
 
 struct PricePoint {
@@ -91,7 +102,11 @@ struct PricePoint {
     let cents: Double
 }
 
-typealias ActiveMarket = (calc: PositionCalc, points: [PricePoint])
+struct ActiveMarketData {
+    let summary: PortfolioSummary
+    let top: PositionCalc?    // biggest open position; nil when flat
+    let points: [PricePoint]  // recent fills for top's market
+}
 
 enum LoadState<T> {
     case noWallet
@@ -129,6 +144,15 @@ func summarize(_ w: WirePortfolio, titles: [String: String]) -> PortfolioSummary
     let locked = live
         .filter { ($0.side ?? 0) == 0 } // BUY soft-locks USDC
         .reduce(0.0) { $0 + ($1.remaining ?? 0) * ($1.price ?? 0) * 10_000 }
+    let orders = live.map { o in
+        OrderCalc(
+            title: o.market_id.flatMap { titles[$0] ?? shortID($0) } ?? "—",
+            side: (o.side ?? 0) == 0 ? "BUY" : "SELL",
+            outcome: (o.outcome ?? 1) == 1 ? "YES" : "NO",
+            price: o.price ?? 0,
+            remaining: o.remaining ?? 0
+        )
+    }
     return PortfolioSummary(
         availableMicro: w.balance?.usdc_available ?? 0,
         valueMicro: positions.reduce(0) { $0 + $1.valueMicro },
@@ -136,7 +160,8 @@ func summarize(_ w: WirePortfolio, titles: [String: String]) -> PortfolioSummary
         realizedMicro: realizedTotal,
         lockedMicro: locked,
         openOrders: live.count,
-        positions: positions
+        positions: positions,
+        orders: orders
     )
 }
 
@@ -187,15 +212,17 @@ struct WidgetLoader {
         }
     }
 
-    static func loadActiveMarket() async -> LoadState<ActiveMarket?> {
+    static func loadActiveMarket() async -> LoadState<ActiveMarketData> {
         switch await loadPortfolio() {
         case .noWallet: return .noWallet
         case .failure: return .failure
         case .data(let s):
-            guard let top = s.positions.first else { return .data(nil) }
+            guard let top = s.positions.first else {
+                return .data(ActiveMarketData(summary: s, top: nil, points: []))
+            }
             guard let cfg = config(),
                   let url = URL(string: "\(cfg.apiURL)/markets/\(top.marketID)/fills")
-            else { return .data((top, [])) }
+            else { return .data(ActiveMarketData(summary: s, top: top, points: [])) }
             let wire = (try? await fetch(url, as: WireFills.self))?.fills ?? []
             let iso = ISO8601DateFormatter()
             iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -207,7 +234,7 @@ struct WidgetLoader {
                 return PricePoint(date: d, cents: p) // fills are in YES terms
             }
             points.sort { $0.date < $1.date }
-            return .data((top, points))
+            return .data(ActiveMarketData(summary: s, top: top, points: points))
         }
     }
 }

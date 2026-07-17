@@ -10,7 +10,7 @@ struct PortfolioEntry: TimelineEntry {
 
 struct ActiveMarketEntry: TimelineEntry {
     let date: Date
-    let state: LoadState<ActiveMarket?>
+    let state: LoadState<ActiveMarketData>
 }
 
 private func schedule(_ ok: Bool) -> Date {
@@ -23,7 +23,7 @@ struct PortfolioProvider: TimelineProvider {
         PortfolioEntry(date: .now, state: .data(PortfolioSummary(
             availableMicro: 1_000_000_000, valueMicro: 250_000_000,
             unrealizedMicro: 12_500_000, realizedMicro: 4_200_000,
-            lockedMicro: 50_000_000, openOrders: 3, positions: [])))
+            lockedMicro: 50_000_000, openOrders: 3, positions: [], orders: [])))
     }
     func getSnapshot(in _: Context, completion: @escaping (PortfolioEntry) -> Void) {
         Task { completion(PortfolioEntry(date: .now, state: await WidgetLoader.loadPortfolio())) }
@@ -41,7 +41,7 @@ struct PortfolioProvider: TimelineProvider {
 
 struct ActiveMarketProvider: TimelineProvider {
     func placeholder(in _: Context) -> ActiveMarketEntry {
-        ActiveMarketEntry(date: .now, state: .data(nil))
+        ActiveMarketEntry(date: .now, state: .noWallet)
     }
     func getSnapshot(in _: Context, completion: @escaping (ActiveMarketEntry) -> Void) {
         Task { completion(ActiveMarketEntry(date: .now, state: await WidgetLoader.loadActiveMarket())) }
@@ -86,6 +86,22 @@ struct StatCell: View {
     }
 }
 
+struct MiniStat: View {
+    let label: String
+    let value: String
+    var tone: Color = Palette.ink
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(value)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(tone)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+            Eyebrow(text: label)
+        }
+    }
+}
+
 struct CenteredNote: View {
     let title: String
     let sub: String
@@ -113,17 +129,28 @@ struct PortfolioView: View {
             CenteredNote(title: "Portfolio", sub: "Couldn’t reach the exchange")
         case .data(let s):
             VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top) {
-                    StatCell(label: "Available", value: Fmt.usd(s.availableMicro))
-                    StatCell(label: "Value · BBP", value: Fmt.usd(s.valueMicro))
-                }
-                HStack(alignment: .top) {
-                    StatCell(label: "Unrealised P&L",
-                             value: Fmt.signedUsd(s.unrealizedMicro),
-                             tone: pnlColor(s.unrealizedMicro))
-                    StatCell(label: "Realised P&L",
-                             value: Fmt.signedUsd(s.realizedMicro),
-                             tone: pnlColor(s.realizedMicro))
+                HStack(alignment: .top, spacing: 14) {
+                    // Available dominates the left half.
+                    VStack(alignment: .leading, spacing: 4) {
+                        Eyebrow(text: "Available")
+                        Text(Fmt.usd(s.availableMicro))
+                            .font(.system(size: 30, weight: .light, design: .monospaced))
+                            .foregroundStyle(Palette.ink)
+                            .minimumScaleFactor(0.5)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // Compact stat stack on the right.
+                    VStack(alignment: .leading, spacing: 6) {
+                        MiniStat(label: "Value · BBP", value: Fmt.usd(s.valueMicro))
+                        MiniStat(label: "Unrealised P&L",
+                                 value: Fmt.signedUsd(s.unrealizedMicro),
+                                 tone: pnlColor(s.unrealizedMicro))
+                        MiniStat(label: "Realised P&L",
+                                 value: Fmt.signedUsd(s.realizedMicro),
+                                 tone: pnlColor(s.realizedMicro))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Spacer(minLength: 0)
                 HStack(spacing: 4) {
@@ -201,6 +228,44 @@ struct PriceChart: View {
 
 // MARK: - Active-market widget (large)
 
+struct PositionRow: View {
+    let p: PositionCalc
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(p.title)
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.muted)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text("\(p.side) \(Fmt.shares(p.qty))")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(p.side == "YES" ? Palette.accent : Palette.down)
+            Text(Fmt.signedUsd(p.unrealizedMicro))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(pnlColor(p.unrealizedMicro))
+        }
+    }
+}
+
+struct OrderRow: View {
+    let o: OrderCalc
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(o.title)
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.muted)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text("\(o.side) \(o.outcome)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(o.outcome == "YES" ? Palette.accent : Palette.down)
+            Text("\(Fmt.shares(o.remaining)) @ \(Fmt.cents(o.price))")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Palette.ink)
+        }
+    }
+}
+
 struct ActiveMarketView: View {
     let entry: ActiveMarketEntry
     var body: some View {
@@ -209,10 +274,30 @@ struct ActiveMarketView: View {
             CenteredNote(title: "PitchMarket", sub: "Open the app and connect a wallet")
         case .failure:
             CenteredNote(title: "Active market", sub: "Couldn’t reach the exchange")
-        case .data(nil):
-            CenteredNote(title: "No open positions", sub: "Your biggest position shows up here")
-        case .data(let am?):
-            let c = am.calc
+        case .data(let am) where am.top == nil:
+            // Flat, but resting orders are still worth showing while they wait to fill.
+            VStack(alignment: .leading, spacing: 8) {
+                Text("No open positions")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                if am.summary.orders.isEmpty {
+                    Text("Your biggest position shows up here")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                    Spacer()
+                } else {
+                    Eyebrow(text: "Open orders — waiting to fill")
+                    ForEach(Array(am.summary.orders.prefix(6).enumerated()), id: \.offset) { _, o in
+                        OrderRow(o: o)
+                    }
+                    Spacer(minLength: 0)
+                    Text(Fmt.asOf(entry.date))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Palette.dim)
+                }
+            }
+        case .data(let am):
+            let c = am.top!
             let gain = c.unrealizedMicro >= 0
             VStack(alignment: .leading, spacing: 8) {
                 // header
@@ -253,6 +338,16 @@ struct ActiveMarketView: View {
                 }
                 PriceChart(points: am.points, entry: c.entry, gain: gain)
                     .frame(maxHeight: .infinity)
+                // Other open positions, biggest first.
+                if am.summary.positions.count > 1 {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Eyebrow(text: "Other positions")
+                        ForEach(Array(am.summary.positions.dropFirst().prefix(2).enumerated()),
+                                id: \.offset) { _, p in
+                            PositionRow(p: p)
+                        }
+                    }
+                }
                 Text(Fmt.asOf(entry.date))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Palette.dim)
