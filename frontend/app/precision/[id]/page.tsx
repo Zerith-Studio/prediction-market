@@ -9,6 +9,7 @@ import { api, configured, type PrecisionEntry } from "@/lib/api";
 import type { Market, Match } from "@/lib/types";
 import { usd } from "@/lib/format";
 import { TopBar } from "@/components/TopBar";
+import { FlagPair } from "@/components/TeamFlag";
 import { usePitchWallet } from "@/lib/wallet";
 
 export default function PrecisionPage({ params }: { params: { id: string } }) {
@@ -102,8 +103,11 @@ export default function PrecisionPage({ params }: { params: { id: string } }) {
             </span>
           </div>
           {match && (
-            <p className="font-mono text-[12px] text-dim">
-              {match.home} vs {match.away}
+            <p className="flex items-center gap-2 font-mono text-[12px] text-dim">
+              <FlagPair home={match.home} away={match.away} size={16} />
+              <span>
+                {match.home} vs {match.away}
+              </span>
             </p>
           )}
         </div>
