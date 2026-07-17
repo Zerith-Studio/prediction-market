@@ -63,11 +63,20 @@ type Provider struct {
 
 type scoreState struct {
 	homeID, awayID int64
+	p1IsHome       bool
 	home, away     int
 	htHome, htAway int
 	minute         int
+	period         string
 	kickedOff      bool
 	finished       bool
+	lineupsSent    bool
+
+	// live per-team stats from the stats map (totals)
+	ycHome, ycAway           int // yellow cards
+	rcHome, rcAway           int // red cards
+	cornersHome, cornersAway int
+	possHome, possAway       *int // possession %, nil until the feed reports it
 }
 
 // New provisions credentials (or loads the cache) and returns a live provider.
@@ -407,14 +416,16 @@ func (p *Provider) handleOdds(o wireOdds) {
 }
 
 type wireScore struct {
-	FixtureID      int64          `json:"FixtureId"`
-	GameState      any            `json:"GameState"`
-	Action         string         `json:"Action"`
-	Participant1ID int64          `json:"Participant1Id"`
-	Participant2ID int64          `json:"Participant2Id"`
-	Participant1H  bool           `json:"Participant1IsHome"`
-	Data           map[string]any `json:"Data"`
-	Stats          map[string]any `json:"Stats"`
+	FixtureID      int64            `json:"FixtureId"`
+	GameState      any              `json:"GameState"`
+	Action         string           `json:"Action"`
+	Participant1ID int64            `json:"Participant1Id"`
+	Participant2ID int64            `json:"Participant2Id"`
+	Participant1H  bool             `json:"Participant1IsHome"`
+	Data           map[string]any   `json:"Data"`
+	Stats          map[string]any   `json:"Stats"`
+	Lineups        []wireLineupTeam `json:"lineups"`    // team sheets (case-insensitive match)
+	Possession     *int             `json:"possession"` // Participant-1 possession %, when present
 }
 
 func (p *Provider) handleScoreFrame(b []byte) {
@@ -437,7 +448,8 @@ func (p *Provider) handleScore(s wireScore) {
 		p.mu.Unlock()
 		return // not a fixture we cover
 	}
-	if st.homeID == 0 {
+	if st.homeID == 0 && (s.Participant1ID != 0 || s.Participant2ID != 0) {
+		st.p1IsHome = s.Participant1H
 		if s.Participant1H {
 			st.homeID, st.awayID = s.Participant1ID, s.Participant2ID
 		} else {
@@ -452,6 +464,7 @@ func (p *Provider) handleScore(s wireScore) {
 	case action == "kickoff" || (action == "period_start" && !st.kickedOff):
 		if !st.kickedOff {
 			st.kickedOff = true
+			st.period = "1H"
 			emit = feed.EventKickoff
 		}
 	case action == "goal":
@@ -467,22 +480,45 @@ func (p *Provider) handleScore(s wireScore) {
 		if st.htHome == 0 && st.htAway == 0 {
 			st.htHome, st.htAway = st.home, st.away
 		}
+		st.period = "HT"
+		emit = feed.EventScore
+	case action == "period_start" && st.kickedOff:
+		st.period = "2H"
 		emit = feed.EventScore
 	case action == "final_whistle" || gameStateFinished(s.GameState):
 		if !st.finished {
 			st.finished = true
+			st.period = "FT"
 			emit = feed.EventFullTime
 		}
 	}
+	// Possession: the feed reports Participant-1's share; split it by side.
+	if s.Possession != nil {
+		p1 := clampPct(*s.Possession)
+		other := 100 - p1
+		if st.p1IsHome {
+			st.possHome, st.possAway = &p1, &other
+		} else {
+			st.possAway, st.possHome = &p1, &other
+		}
+	}
 	// Stats carry authoritative totals (period_prefix+base_key) — applied
-	// after the action so they override the local goal counter.
+	// after the action so they override the local counters.
 	applyStats(st, s.Stats)
 	var payload map[string]any
 	if emit != "" {
 		if emit == feed.EventKickoff {
-			payload = map[string]any{"minute": 0}
+			payload = map[string]any{"minute": 0, "period": "1H"}
 		} else {
 			payload = scorePayload(st)
+		}
+	}
+	// Team sheets arrive once (often on a dedicated frame with no action);
+	// emit them independently of the score event.
+	var lineups *Lineups
+	if len(s.Lineups) > 0 && !st.lineupsSent {
+		if lineups = normalizeLineups(s.Lineups, st.homeID, st.awayID); lineups != nil {
+			st.lineupsSent = true
 		}
 	}
 	p.mu.Unlock()
@@ -490,45 +526,68 @@ func (p *Provider) handleScore(s wireScore) {
 	if emit != "" {
 		p.broadcast(fixtureID, feed.MatchEvent{FixtureID: fixtureID, Type: emit, Payload: payload})
 	}
+	if lineups != nil {
+		p.broadcast(fixtureID, feed.MatchEvent{FixtureID: fixtureID, Type: feed.EventLineup, Payload: lineups})
+	}
+}
+
+func clampPct(v int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
 }
 
 func scorePayload(st *scoreState) map[string]any {
-	return map[string]any{
+	payload := map[string]any{
+		"minute":        st.minute,
 		"home_goals":    st.home,
 		"away_goals":    st.away,
 		"ht_home_goals": st.htHome,
 		"ht_away_goals": st.htAway,
-		"minute":        st.minute,
+		"stats": map[string]any{
+			"home": map[string]any{"yellow": st.ycHome, "red": st.rcHome, "corners": st.cornersHome},
+			"away": map[string]any{"yellow": st.ycAway, "red": st.rcAway, "corners": st.cornersAway},
+		},
 	}
+	if st.period != "" {
+		payload["period"] = st.period
+	}
+	if st.possHome != nil && st.possAway != nil {
+		payload["possession"] = map[string]any{"home": *st.possHome, "away": *st.possAway}
+	}
+	return payload
 }
 
+// applyStats folds authoritative per-participant totals (goals, H1 goals, cards,
+// corners) from the stats map into home/away fields, mapping Participant 1/2 →
+// home/away via p1IsHome. The stats map is authoritative and overrides the
+// action-counted goals.
 func applyStats(st *scoreState, stats map[string]any) {
-	get := func(key string) (int, bool) {
-		v, ok := stats[key]
-		if !ok {
-			return 0, false
+	if stats == nil {
+		return
+	}
+	assign := func(p1Base, prefix int, home, away *int) {
+		p1, ok1 := statValue(stats, p1Base, prefix)
+		p2, ok2 := statValue(stats, p1Base+1, prefix)
+		if !st.p1IsHome {
+			p1, p2, ok1, ok2 = p2, p1, ok2, ok1
 		}
-		switch n := v.(type) {
-		case float64:
-			return int(n), true
-		case string:
-			i, err := strconv.Atoi(n)
-			return i, err == nil
+		if ok1 {
+			*home = p1
 		}
-		return 0, false
+		if ok2 {
+			*away = p2
+		}
 	}
-	if v, ok := get("1"); ok {
-		st.home = v
-	}
-	if v, ok := get("2"); ok {
-		st.away = v
-	}
-	if v, ok := get("1001"); ok {
-		st.htHome = v
-	}
-	if v, ok := get("1002"); ok {
-		st.htAway = v
-	}
+	assign(statP1Goals, periodTotal, &st.home, &st.away)
+	assign(statP1Goals, periodH1, &st.htHome, &st.htAway)
+	assign(statP1Yellow, periodTotal, &st.ycHome, &st.ycAway)
+	assign(statP1Red, periodTotal, &st.rcHome, &st.rcAway)
+	assign(statP1Corner, periodTotal, &st.cornersHome, &st.cornersAway)
 }
 
 func participantOf(data map[string]any) int64 {
@@ -588,6 +647,7 @@ func (p *Provider) FinalState(ctx context.Context, fixtureID string) (Result, bo
 	finished := false
 	for _, s := range frames {
 		if st.homeID == 0 && (s.Participant1ID != 0 || s.Participant2ID != 0) {
+			st.p1IsHome = s.Participant1H
 			if s.Participant1H {
 				st.homeID, st.awayID = s.Participant1ID, s.Participant2ID
 			} else {

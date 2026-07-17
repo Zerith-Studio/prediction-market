@@ -12,6 +12,10 @@ const (
 	EventKickoff  EventType = "kickoff"
 	EventFullTime EventType = "full_time"
 	EventOdds     EventType = "odds"
+	// EventLineup carries a fixture's team sheets (starting XI + substitutes).
+	// Emitted once when the feed first delivers lineups; persisted separately
+	// from live_state (it's static per match, not per-tick).
+	EventLineup EventType = "lineup"
 )
 
 // MatchEvent is the normalized shape both txodds and replay providers emit.
