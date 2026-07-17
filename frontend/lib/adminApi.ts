@@ -186,6 +186,13 @@ export const admin = {
       {},
     ),
 
+  setPrice: (marketId: string, price: number) =>
+    req<{ market_id: string; price: number }>(
+      "POST",
+      `/admin/markets/${marketId}/price`,
+      { price },
+    ),
+
   resolveFixture: (fixtureId: string, score: FinalScore) =>
     req<{ fixture_id: string; markets: AdminMarket[] }>(
       "POST",

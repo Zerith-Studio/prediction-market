@@ -19,12 +19,13 @@ import (
 )
 
 var (
-	ErrBadLegs      = errors.New("rfq: combo needs 2..6 distinct binary legs")
-	ErrMutexConflict = errors.New("rfq: legs are mutually exclusive (same mutex group, same match)")
-	ErrLegNotOpen   = errors.New("rfq: leg market is not open")
-	ErrBadSignature = errors.New("rfq: quote signature does not verify")
-	ErrExpired      = errors.New("rfq: quote expiry must be in the future")
-	ErrLegsMismatch = errors.New("rfq: quote legs differ from the RFQ's legs")
+	ErrBadLegs                = errors.New("rfq: combo needs 2..6 distinct binary legs")
+	ErrMutexConflict          = errors.New("rfq: legs are mutually exclusive (same mutex group, same match)")
+	ErrLegNotOpen             = errors.New("rfq: leg market is not open")
+	ErrBadSignature           = errors.New("rfq: quote signature does not verify")
+	ErrExpired                = errors.New("rfq: quote expiry must be in the future")
+	ErrLegsMismatch           = errors.New("rfq: quote legs differ from the RFQ's legs")
+	ErrInsufficientCollateral = errors.New("rfq: maker cannot cover the quote's collateral (payout − stake)")
 )
 
 const MaxLegs = 6 // ComboEscrow::MAX_LEGS in programs/pitchmarket/src/state.rs
@@ -120,6 +121,16 @@ func (s *Service) SubmitQuote(ctx context.Context, q *models.ComboQuote, rfqID s
 	}
 	if !sameLegs(rfq.Legs, q.Legs) || rfq.Stake != q.Stake {
 		return ErrLegsMismatch
+	}
+
+	// The MM must be able to back the quote: acceptance atomically debits its
+	// collateral (payout − stake), so an unbacked quote would fail the taker's
+	// accept through no fault of theirs. Check up front (best-effort — not a hard
+	// reservation across a maker's simultaneous quotes).
+	if bal, err := s.store.GetBalance(ctx, models.PubkeyString(q.Maker)); err != nil {
+		return err
+	} else if bal.Available < q.Payout-q.Stake {
+		return ErrInsufficientCollateral
 	}
 
 	if err := s.store.InsertQuote(ctx, q, rfqID); err != nil {

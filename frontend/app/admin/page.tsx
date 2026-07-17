@@ -496,6 +496,7 @@ function MarketRow({
 }) {
   const [armed, setArmed] = useState<string | null>(null);
   const [value, setValue] = useState("");
+  const [price, setPrice] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -527,6 +528,24 @@ function MarketRow({
         const r = await admin.cancelOrders(m.market_id);
         notify(m.title, `cleared ${r.cancelled} orders`, "");
       }
+      onChanged();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Push a manual fair price so the MM bot quotes this market two-sided (seeds
+  // liquidity to trade against, and lets the bot answer combos on it).
+  async function setBotPrice() {
+    if (!price) return;
+    setBusy("price");
+    setErr(null);
+    try {
+      await admin.setPrice(m.market_id, Number(price));
+      notify(m.title, `bot quoting @ ${price}¢`, "");
+      setPrice("");
       onChanged();
     } catch (e) {
       setErr((e as Error).message);
@@ -617,6 +636,23 @@ function MarketRow({
 
           {!resolved && (
             <div className="flex items-center gap-3">
+              {m.type === "binary" && (
+                <span className="flex items-center gap-1" title="Set a fair price so the bot quotes this market (liquidity + combos)">
+                  <input
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value.replace(/\D/g, ""))}
+                    placeholder="¢"
+                    className="w-9 border-b border-line2 bg-transparent pb-0.5 text-right font-mono text-[11px] text-ink outline-none focus:border-accent tnum"
+                  />
+                  <button
+                    onClick={setBotPrice}
+                    disabled={!price || busy === "price"}
+                    className={ghostBtn + " text-accent hover:brightness-110"}
+                  >
+                    {busy === "price" ? "…" : "quote"}
+                  </button>
+                </span>
+              )}
               <button onClick={() => op("clear")} disabled={busy === "clear"} className={ghostBtn}>
                 {busy === "clear" ? "…" : "clear orders"}
               </button>
