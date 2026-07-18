@@ -12,6 +12,7 @@ import { RecentFills } from "@/components/RecentFills";
 import { Comments } from "@/components/Comments";
 import { TradePanel } from "@/components/TradePanel";
 import { MarketPositions } from "@/components/MarketPositions";
+import { RelatedMarkets } from "@/components/RelatedMarkets";
 import { PitchTicker } from "@/components/PitchTicker";
 import { MarketSkeleton } from "@/components/Skeletons";
 import { StarButton } from "@/components/StarButton";
@@ -130,6 +131,9 @@ export default function MarketPage({
               <OrderBook book={m.book} flashId={m.lastFillId} flashSide={m.lastFillSide} />
               <RecentFills fills={m.fills} yesPrice={m.yesPrice} />
             </div>
+
+            {/* other markets on this fixture / involving either team */}
+            <RelatedMarkets current={m.market} match={m.match} />
 
             {/* per-market discussion */}
             <Comments marketId={params.id} />
