@@ -18,6 +18,7 @@ import {
   adminConfigured,
   type AdminFixture,
   type AdminMarket,
+  type AdminMarketDefinition,
   type AdminOps,
   type FinalScore,
 } from "@/lib/adminApi";
@@ -33,6 +34,10 @@ const ghostBtn =
   "font-mono text-[11px] text-dim transition-colors hover:text-ink disabled:opacity-40";
 const dangerBtn =
   "font-mono text-[11px] text-dim transition-colors hover:text-down disabled:opacity-40";
+const textInput =
+  "w-full border-b border-line2 bg-transparent pb-1 font-mono text-[12px] text-ink outline-none focus:border-accent";
+const textArea =
+  "w-full resize-none border border-line2 bg-transparent p-2 text-[12px] leading-relaxed text-ink outline-none focus:border-accent";
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState(false);
@@ -188,6 +193,7 @@ function AdminConsole({ onSignOut }: { onSignOut: () => void }) {
       )}
       {notices.length > 0 && <Notices notices={notices} />}
       <FixturesSection onChanged={load} notify={notify} />
+      <MarketBuilderSection onChanged={load} notify={notify} />
       <MarketsSection markets={markets} onChanged={load} notify={notify} />
       <ResolveFromScoreSection onChanged={load} notify={notify} />
     </div>
@@ -448,6 +454,177 @@ function fixtureErr(e: unknown): string {
   if (e instanceof ApiError && e.status === 503)
     return "Live fixture feed not configured (replay / off-chain mode).";
   return (e as Error).message;
+}
+
+// --- market builder ----------------------------------------------------------
+
+function MarketBuilderSection({
+  onChanged,
+  notify,
+}: {
+  onChanged: () => void;
+  notify: (title: string, detail: string, tx: string) => void;
+}) {
+  const [defs, setDefs] = useState<AdminMarketDefinition[]>([]);
+  const [defKey, setDefKey] = useState("world_cup_winner");
+  const [scope, setScope] = useState("competition");
+  const [fixtureId, setFixtureId] = useState("");
+  const [home, setHome] = useState("");
+  const [away, setAway] = useState("");
+  const [competitionId, setCompetitionId] = useState("72");
+  const [subjectType, setSubjectType] = useState("team");
+  const [subjectId, setSubjectId] = useState("");
+  const [title, setTitle] = useState("");
+  const [rule, setRule] = useState("");
+  const [ruleJson, setRuleJson] = useState("{}");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    admin
+      .marketDefinitions()
+      .then((d) => {
+        setDefs(d);
+        const first = d.find((x) => x.key === defKey) ?? d[0];
+        if (first) applyDef(first);
+      })
+      .catch((e) => setErr((e as Error).message));
+    // load once; later changes are operator input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function applyDef(d: AdminMarketDefinition) {
+    setDefKey(d.key);
+    setScope(d.scope);
+    setTitle(d.title_template);
+    setRule(d.rule_template);
+    setRuleJson(JSON.stringify(d.rule_json ?? {}, null, 2));
+    if (d.scope === "player") setSubjectType("player");
+    if (d.scope === "team" || d.scope === "competition") setSubjectType("team");
+  }
+
+  async function create() {
+    setBusy(true);
+    setErr(null);
+    try {
+      let parsed: unknown = {};
+      try {
+        parsed = JSON.parse(renderMarketTemplate(ruleJson || "{}"));
+      } catch {
+        throw new Error("rule JSON is invalid");
+      }
+      const m = await admin.createCustomMarket({
+        scope,
+        fixture_id: fixtureId || undefined,
+        home: home || undefined,
+        away: away || undefined,
+        template_key: defKey,
+        type: "binary",
+        title: renderMarketTemplate(title),
+        rule: renderMarketTemplate(rule),
+        competition_id: competitionId || undefined,
+        subject_type: subjectType || undefined,
+        subject_id: subjectId || undefined,
+        resolution_source: "manual_required",
+        rule_json: parsed,
+      });
+      notify("market builder", `created ${m.title}`, m.chain_tx ?? "");
+      onChanged();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function renderMarketTemplate(s: string): string {
+    const subject = subjectId || subjectType || "";
+    const team = subjectType === "team" ? subject : subject;
+    const player = subjectType === "player" ? subject : subject;
+    return s
+      .replaceAll("{{team}}", titleCase(team))
+      .replaceAll("{{player}}", titleCase(player))
+      .replaceAll("{{competition}}", competitionId)
+      .replaceAll("{{home}}", home)
+      .replaceAll("{{away}}", away)
+      .replaceAll("{{subject}}", titleCase(subject));
+  }
+
+  const selected = defs.find((d) => d.key === defKey);
+
+  return (
+    <section>
+      <span className="eyebrow">market builder</span>
+      <p className="mt-2 max-w-[680px] text-[12.5px] leading-relaxed text-muted">
+        Create fixture, competition, team, player, or custom markets with an explicit
+        machine-readable resolution rule. Golden Boot / Golden Glove are marked
+        manual-required until TxLINE player/award endpoints are confirmed.
+      </p>
+      {err && (
+        <p role="alert" className="mt-3 font-mono text-[12px] text-down">
+          {err}
+        </p>
+      )}
+      <div className="mt-5 grid gap-4 md:grid-cols-3">
+        <Field label="definition">
+          <select
+            value={defKey}
+            onChange={(e) => {
+              const d = defs.find((x) => x.key === e.target.value);
+              if (d) applyDef(d);
+            }}
+            className="w-full border-b border-line2 bg-bg pb-1 font-mono text-[12px] text-ink outline-none focus:border-accent"
+          >
+            {defs.map((d) => (
+              <option key={d.key} value={d.key}>
+                {d.key}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="scope">
+          <input value={scope} onChange={(e) => setScope(e.target.value)} className={textInput} />
+        </Field>
+        <Field label="competition">
+          <input value={competitionId} onChange={(e) => setCompetitionId(e.target.value)} className={textInput} />
+        </Field>
+        <Field label="fixture id">
+          <input value={fixtureId} onChange={(e) => setFixtureId(e.target.value)} placeholder="fixture-scoped only" className={textInput} />
+        </Field>
+        <Field label="home">
+          <input value={home} onChange={(e) => setHome(e.target.value)} className={textInput} />
+        </Field>
+        <Field label="away">
+          <input value={away} onChange={(e) => setAway(e.target.value)} className={textInput} />
+        </Field>
+        <Field label="subject type">
+          <input value={subjectType} onChange={(e) => setSubjectType(e.target.value)} className={textInput} />
+        </Field>
+        <Field label="subject id">
+          <input value={subjectId} onChange={(e) => setSubjectId(e.target.value)} placeholder="team/player id" className={textInput} />
+        </Field>
+        <Field label="title">
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className={textInput} />
+        </Field>
+      </div>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <Field label="rule">
+          <textarea value={rule} onChange={(e) => setRule(e.target.value)} rows={4} className={textArea} />
+        </Field>
+        <Field label="rule JSON">
+          <textarea value={ruleJson} onChange={(e) => setRuleJson(e.target.value)} rows={4} className={textArea + " font-mono"} />
+        </Field>
+      </div>
+      {selected?.txline_requirements?.length ? (
+        <div className="mt-3 font-mono text-[11px] text-dim">
+          TxLINE requirements: {selected.txline_requirements.join(" · ")}
+        </div>
+      ) : null}
+      <button onClick={create} disabled={busy || !title || !rule || !defKey} className={primaryBtn + " mt-5"}>
+        {busy ? "Creating…" : "Create market"}
+      </button>
+    </section>
+  );
 }
 
 // --- markets -----------------------------------------------------------------
@@ -862,4 +1039,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <div className="py-8 text-[13px] text-dim">{children}</div>;
+}
+
+function titleCase(s: string): string {
+  return s
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }

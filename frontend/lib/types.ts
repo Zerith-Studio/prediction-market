@@ -71,6 +71,11 @@ export interface Market {
   outcome?: { winner?: "YES" | "NO"; value?: number; void?: boolean } | null;
   chain_tx?: string;
   featured_rank?: number | null; // set = pinned to the featured hero (admin)
+  scope?: "fixture" | "competition" | "team" | "player" | "custom";
+  competition_id?: string;
+  subject_type?: string;
+  subject_id?: string;
+  resolution_source?: string;
 }
 
 export interface BookLevel {

@@ -28,7 +28,7 @@ ALTER TABLE matches ADD COLUMN IF NOT EXISTS lineups JSONB;
 CREATE TABLE IF NOT EXISTS markets (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     market_id       BYTEA UNIQUE NOT NULL, -- [u8;32] on-chain market_id
-    match_id        UUID NOT NULL REFERENCES matches(id),
+    match_id        UUID REFERENCES matches(id),
     template_key    TEXT NOT NULL,
     type            TEXT NOT NULL CHECK (type IN ('binary', 'precision')),
     title           TEXT NOT NULL,
@@ -43,6 +43,43 @@ CREATE TABLE IF NOT EXISTS markets (
 -- Admin "pin" for the featured hero on the markets index. NULL = not pinned;
 -- lower rank = higher priority. Added post-hoc; safe on existing DBs.
 ALTER TABLE markets ADD COLUMN IF NOT EXISTS featured_rank INTEGER;
+
+-- Markets started fixture-only; custom tournament/player markets are not tied to
+-- a match row. Safe on existing DBs.
+ALTER TABLE markets ALTER COLUMN match_id DROP NOT NULL;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'fixture'
+    CHECK (scope IN ('fixture','competition','team','player','custom'));
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS competition_id TEXT;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS subject_type TEXT;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS subject_id TEXT;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS resolution_source TEXT NOT NULL DEFAULT 'txline_fixture'
+    CHECK (resolution_source IN ('txline_fixture','txline_competition','manual_required','manual'));
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS rule_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE TABLE IF NOT EXISTS market_definitions (
+    key                    TEXT PRIMARY KEY,
+    scope                  TEXT NOT NULL CHECK (scope IN ('fixture','competition','team','player','custom')),
+    type                   TEXT NOT NULL CHECK (type IN ('binary','precision')),
+    title_template         TEXT NOT NULL,
+    rule_template          TEXT NOT NULL,
+    rule_json              JSONB NOT NULL DEFAULT '{}'::jsonb,
+    required_inputs_schema JSONB NOT NULL DEFAULT '{}'::jsonb,
+    txline_requirements    JSONB NOT NULL DEFAULT '[]'::jsonb,
+    status                 TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('draft','active','deprecated')),
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS resolution_attempts (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    market_id   BYTEA NOT NULL REFERENCES markets(market_id),
+    actor       TEXT NOT NULL,
+    outcome     TEXT NOT NULL,
+    evidence    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    tx          TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS resolution_attempts_market_idx
+    ON resolution_attempts (market_id, created_at DESC);
 
 -- Demo mirror of vault USDC balances (micro-USDC). The vault-owned ATAs on chain
 -- are authoritative; usdc_locked is the E2 soft-lock (UX only, interface-contract §6.2).

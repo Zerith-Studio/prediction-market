@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -32,7 +34,7 @@ func scanMatch(row pgx.Row) (MatchRow, error) {
 type MarketRow struct {
 	ID          string    `json:"id"`
 	MarketID    [32]byte  `json:"-"`
-	MatchID     string    `json:"match_id"`
+	MatchID     string    `json:"match_id,omitempty"`
 	TemplateKey string    `json:"template_key"`
 	Type        string    `json:"type"`
 	Title       string    `json:"title"`
@@ -41,7 +43,14 @@ type MarketRow struct {
 	Outcome     []byte    `json:"outcome,omitempty"` // raw JSONB
 	ChainTx     string    `json:"chain_tx,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
-	FeaturedRank *int     `json:"featured_rank,omitempty"` // nil = not pinned; lower = higher priority
+	FeaturedRank *int      `json:"featured_rank,omitempty"` // nil = not pinned; lower = higher priority
+
+	Scope            string `json:"scope"`
+	CompetitionID    string `json:"competition_id,omitempty"`
+	SubjectType      string `json:"subject_type,omitempty"`
+	SubjectID        string `json:"subject_id,omitempty"`
+	ResolutionSource string `json:"resolution_source"`
+	RuleJSON         []byte `json:"rule_json,omitempty"`
 }
 
 // UpsertMatch registers a fixture (feed-driven auto market creation, PROJECT_PLAN §3).
@@ -155,21 +164,25 @@ func (s *Store) UnresolvedMatches(ctx context.Context, olderThan time.Time) ([]M
 // CreateMarket inserts a market row in 'open' status. Idempotent on market_id.
 func (s *Store) CreateMarket(ctx context.Context, marketID [32]byte, matchID, templateKey, typ, title, rule string) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO markets (market_id, match_id, template_key, type, title, rule, status)
-		VALUES ($1,$2,$3,$4,$5,$6,'open')
+		INSERT INTO markets (market_id, match_id, template_key, type, title, rule, status, scope, resolution_source)
+		VALUES ($1,$2,$3,$4,$5,$6,'open','fixture','txline_fixture')
 		ON CONFLICT (market_id) DO NOTHING`,
 		marketID[:], matchID, templateKey, typ, title, rule)
 	return err
 }
 
 const marketColumns = `id, market_id, COALESCE(match_id::text, ''), template_key, type, title, rule, status,
-	COALESCE(outcome, 'null'::jsonb), COALESCE(chain_tx, ''), created_at, featured_rank`
+	COALESCE(outcome, 'null'::jsonb), COALESCE(chain_tx, ''), created_at,
+	scope, COALESCE(competition_id, ''), COALESCE(subject_type, ''), COALESCE(subject_id, ''),
+	resolution_source, rule_json, featured_rank`
 
 func scanMarket(row pgx.Row) (MarketRow, error) {
 	var m MarketRow
 	var marketID []byte
 	err := row.Scan(&m.ID, &marketID, &m.MatchID, &m.TemplateKey, &m.Type, &m.Title,
-		&m.Rule, &m.Status, &m.Outcome, &m.ChainTx, &m.CreatedAt, &m.FeaturedRank)
+		&m.Rule, &m.Status, &m.Outcome, &m.ChainTx, &m.CreatedAt, &m.Scope,
+		&m.CompetitionID, &m.SubjectType, &m.SubjectID, &m.ResolutionSource, &m.RuleJSON,
+		&m.FeaturedRank)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return m, ErrNotFound
 	}
@@ -182,16 +195,16 @@ func (s *Store) GetMarket(ctx context.Context, marketID [32]byte) (MarketRow, er
 		`SELECT `+marketColumns+` FROM markets WHERE market_id = $1`, marketID[:]))
 }
 
-// ListMarkets returns markets, optionally filtered by status ("" = all).
+// ListMarkets returns markets, optionally filtered by status ("" = all). Global
+// (match-less) markets from the market builder are included: marketColumns
+// COALESCEs match_id::text, so a NULL scans as "" rather than erroring the whole
+// list (the prior hotfix that excluded them is superseded by real global-market
+// support here — the frontend renders them by scope).
 func (s *Store) ListMarkets(ctx context.Context, status string) ([]MarketRow, error) {
-	// match_id IS NOT NULL: tournament-wide markets (no single match) can exist in
-	// the DB but the match-centric UI can't render them — exclude rather than 500
-	// the whole list. COALESCE in marketColumns is the belt-and-suspenders so any
-	// other market read (e.g. GetMarket) also survives a NULL match_id.
-	q := `SELECT ` + marketColumns + ` FROM markets WHERE match_id IS NOT NULL`
+	q := `SELECT ` + marketColumns + ` FROM markets`
 	args := []any{}
 	if status != "" {
-		q += ` AND status = $1`
+		q += ` WHERE status = $1`
 		args = append(args, status)
 	}
 	q += ` ORDER BY featured_rank NULLS LAST, created_at`
@@ -269,4 +282,102 @@ func (s *Store) SettleMarket(ctx context.Context, marketID [32]byte, outcomeJSON
 		return ErrNotFound
 	}
 	return nil
+}
+
+type CustomMarketRequest struct {
+	Scope            string
+	FixtureID        string
+	MatchID          string
+	TemplateKey      string
+	Type             string
+	Title            string
+	Rule             string
+	CompetitionID    string
+	SubjectType      string
+	SubjectID        string
+	ResolutionSource string
+	RuleJSON         json.RawMessage
+}
+
+func CustomMarketID(req CustomMarketRequest) [32]byte {
+	scope := req.Scope
+	if scope == "" {
+		scope = "custom"
+	}
+	return sha256.Sum256([]byte("pitchmarket:v2:" + scope + ":" + req.FixtureID + ":" + req.CompetitionID + ":" +
+		req.SubjectType + ":" + req.SubjectID + ":" + req.TemplateKey + ":" + req.Title))
+}
+
+func (s *Store) CreateCustomMarket(ctx context.Context, req CustomMarketRequest) ([32]byte, error) {
+	if req.Scope == "" {
+		req.Scope = "custom"
+	}
+	if req.Type == "" {
+		req.Type = "binary"
+	}
+	if req.ResolutionSource == "" {
+		req.ResolutionSource = "manual_required"
+	}
+	if len(req.RuleJSON) == 0 {
+		req.RuleJSON = json.RawMessage(`{}`)
+	}
+	var matchID *string
+	if req.MatchID != "" {
+		matchID = &req.MatchID
+	}
+	marketID := CustomMarketID(req)
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO markets (
+			market_id, match_id, template_key, type, title, rule, status,
+			scope, competition_id, subject_type, subject_id, resolution_source, rule_json
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, 'open', $7, $8, $9, $10, $11, $12::jsonb)
+		ON CONFLICT (market_id) DO NOTHING`,
+		marketID[:], matchID, req.TemplateKey, req.Type, req.Title, req.Rule, req.Scope,
+		req.CompetitionID, req.SubjectType, req.SubjectID, req.ResolutionSource, string(req.RuleJSON))
+	return marketID, err
+}
+
+type ResolutionAttempt struct {
+	ID        string
+	MarketID  [32]byte
+	Actor     string
+	Outcome   string
+	Evidence  []byte
+	Tx        string
+	CreatedAt time.Time
+}
+
+func (s *Store) RecordResolutionAttempt(ctx context.Context, a ResolutionAttempt) error {
+	if len(a.Evidence) == 0 {
+		a.Evidence = []byte(`{}`)
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO resolution_attempts (market_id, actor, outcome, evidence, tx)
+		VALUES ($1,$2,$3,$4::jsonb,$5)`,
+		a.MarketID[:], a.Actor, a.Outcome, string(a.Evidence), a.Tx)
+	return err
+}
+
+func (s *Store) ResolutionAttempts(ctx context.Context, marketID [32]byte) ([]ResolutionAttempt, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, market_id, actor, outcome, evidence, COALESCE(tx, ''), created_at
+		FROM resolution_attempts
+		WHERE market_id = $1
+		ORDER BY created_at DESC`, marketID[:])
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ResolutionAttempt
+	for rows.Next() {
+		var a ResolutionAttempt
+		var rawID []byte
+		if err := rows.Scan(&a.ID, &rawID, &a.Actor, &a.Outcome, &a.Evidence, &a.Tx, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		copy(a.MarketID[:], rawID)
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }

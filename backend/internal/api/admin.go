@@ -330,8 +330,89 @@ func bookSummary(snap matching.Snapshot) map[string]any {
 }
 
 type adminResolveDTO struct {
-	Outcome string   `json:"outcome"` // binary: yes|no|void. precision: "void" refunds; else settle
-	Value   *float64 `json:"value"`   // precision actual (required unless void)
+	Outcome  string          `json:"outcome"` // binary: yes|no|void. precision: "void" refunds; else settle
+	Value    *float64        `json:"value"`   // precision actual (required unless void)
+	Evidence json.RawMessage `json:"evidence"`
+}
+
+type adminCreateCustomMarketDTO struct {
+	Scope            string          `json:"scope"`
+	FixtureID        string          `json:"fixture_id"`
+	Home             string          `json:"home"`
+	Away             string          `json:"away"`
+	Kickoff          time.Time       `json:"kickoff"`
+	TemplateKey      string          `json:"template_key"`
+	Type             string          `json:"type"`
+	Title            string          `json:"title"`
+	Rule             string          `json:"rule"`
+	CompetitionID    string          `json:"competition_id"`
+	SubjectType      string          `json:"subject_type"`
+	SubjectID        string          `json:"subject_id"`
+	ResolutionSource string          `json:"resolution_source"`
+	RuleJSON         json.RawMessage `json:"rule_json"`
+}
+
+func (s *Server) handleAdminCreateCustomMarket(w http.ResponseWriter, r *http.Request) {
+	var d adminCreateCustomMarketDTO
+	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+		httpError(w, http.StatusBadRequest, "bad payload: "+err.Error())
+		return
+	}
+	if d.TemplateKey == "" || d.Title == "" || d.Rule == "" {
+		httpError(w, http.StatusBadRequest, "template_key, title, and rule are required")
+		return
+	}
+	var matchID string
+	if d.Scope == "fixture" || d.FixtureID != "" {
+		if d.FixtureID == "" || d.Home == "" || d.Away == "" {
+			httpError(w, http.StatusBadRequest, "fixture custom markets require fixture_id, home, and away")
+			return
+		}
+		kickoff := d.Kickoff
+		if kickoff.IsZero() {
+			kickoff = time.Now().Add(2 * time.Hour)
+		}
+		var err error
+		matchID, err = s.store.UpsertMatch(r.Context(), d.FixtureID, d.Home, d.Away, kickoff)
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "upsert fixture: "+err.Error())
+			return
+		}
+		if d.Scope == "" {
+			d.Scope = "fixture"
+		}
+	}
+	req := store.CustomMarketRequest{
+		Scope:            d.Scope,
+		FixtureID:        d.FixtureID,
+		MatchID:          matchID,
+		TemplateKey:      d.TemplateKey,
+		Type:             d.Type,
+		Title:            d.Title,
+		Rule:             d.Rule,
+		CompetitionID:    d.CompetitionID,
+		SubjectType:      d.SubjectType,
+		SubjectID:        d.SubjectID,
+		ResolutionSource: d.ResolutionSource,
+		RuleJSON:         d.RuleJSON,
+	}
+	marketID, err := s.store.CreateCustomMarket(r.Context(), req)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "create custom market: "+err.Error())
+		return
+	}
+	if s.chain != nil && (d.Type == "" || d.Type == "binary") {
+		if _, err := s.chain.InitializeMarket(r.Context(), marketID); err != nil {
+			s.log.Error("admin: custom on-chain initialize_market failed — market stays mirror-only",
+				"market", models.HashString(marketID), "err", err)
+		}
+	}
+	m, err := s.store.GetMarket(r.Context(), marketID)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, marketJSON(m))
 }
 
 func (s *Server) handleAdminResolveMarket(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +432,27 @@ func (s *Server) handleAdminResolveMarket(w http.ResponseWriter, r *http.Request
 			return
 		}
 		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	evidence := d.Evidence
+	if len(evidence) == 0 {
+		evidence = json.RawMessage(`{"manual":true}`)
+	}
+	actor := ""
+	if s.admin != nil {
+		actor = solana.PublicKeyFromBytes(s.admin.pubkey[:]).String()
+	}
+	if actor == "" {
+		actor = "admin"
+	}
+	if err := s.store.RecordResolutionAttempt(r.Context(), store.ResolutionAttempt{
+		MarketID: m.MarketID,
+		Actor:    actor,
+		Outcome:  d.Outcome,
+		Evidence: evidence,
+		Tx:       txSig,
+	}); err != nil {
+		httpError(w, http.StatusInternalServerError, "record resolution evidence: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

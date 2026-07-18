@@ -18,6 +18,7 @@ import (
 	"github.com/Zerith-Studio/prediction-market/backend/internal/exchange"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/feed/txodds"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/lifecycle"
+	"github.com/Zerith-Studio/prediction-market/backend/internal/marketdefs"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/matching"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/models"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/rfq"
@@ -39,9 +40,9 @@ type Server struct {
 	hub       *ws.Hub
 	rfq       *rfq.Service
 	lifecycle *lifecycle.Service
-	chain     *crank.ChainOps        // nil = off-chain mirror mode
-	fixtures  FixtureSource          // nil = admin fixture browser disabled
-	admin     *adminAuth             // operator-wallet gate for /admin (nil until WithAdmin)
+	chain     *crank.ChainOps         // nil = off-chain mirror mode
+	fixtures  FixtureSource           // nil = admin fixture browser disabled
+	admin     *adminAuth              // operator-wallet gate for /admin (nil until WithAdmin)
 	pricer    lifecycle.FairPriceSink // MM bot's fair-price sink (admin manual pricing); nil = disabled
 	log       *slog.Logger
 }
@@ -156,7 +157,9 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /admin/fixtures/{id}/odds", s.adminGuard(s.handleAdminFixtureOdds))
 	mux.HandleFunc("POST /admin/fixtures/{id}/markets", s.adminGuard(s.handleAdminCreateMarkets))
 	mux.HandleFunc("POST /admin/fixtures/{id}/resolve", s.adminGuard(s.handleAdminResolveFixture))
+	mux.HandleFunc("GET /admin/market-definitions", s.adminGuard(s.handleAdminMarketDefinitions))
 	mux.HandleFunc("GET /admin/markets", s.adminGuard(s.handleAdminMarkets))
+	mux.HandleFunc("POST /admin/markets/custom", s.adminGuard(s.handleAdminCreateCustomMarket))
 	mux.HandleFunc("POST /admin/markets/{id}/resolve", s.adminGuard(s.handleAdminResolveMarket))
 	mux.HandleFunc("POST /admin/markets/{id}/close", s.adminGuard(s.handleAdminCloseMarket))
 	mux.HandleFunc("POST /admin/markets/{id}/cancel-orders", s.adminGuard(s.handleAdminCancelOrders))
@@ -172,6 +175,10 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.Handle("GET /ws", s.hub.Handler())
 
 	return mux
+}
+
+func (s *Server) handleAdminMarketDefinitions(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"definitions": marketdefs.Registry()})
 }
 
 // ---- wire DTOs ----
@@ -373,6 +380,12 @@ func marketJSON(m store.MarketRow) map[string]any {
 		"id": m.ID, "market_id": models.HashString(m.MarketID), "match_id": m.MatchID,
 		"template_key": m.TemplateKey, "type": m.Type, "title": m.Title,
 		"rule": m.Rule, "status": m.Status, "created_at": m.CreatedAt,
+		"scope": m.Scope, "competition_id": m.CompetitionID,
+		"subject_type": m.SubjectType, "subject_id": m.SubjectID,
+		"resolution_source": m.ResolutionSource,
+	}
+	if len(m.RuleJSON) > 0 {
+		out["rule_json"] = json.RawMessage(m.RuleJSON)
 	}
 	if len(m.Outcome) > 0 && string(m.Outcome) != "null" {
 		out["outcome"] = json.RawMessage(m.Outcome)

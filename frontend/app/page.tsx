@@ -52,6 +52,8 @@ export default function MarketsIndex() {
   const featured = markets
     .filter((m) => m.featured_rank != null && m.status !== "void")
     .sort((a, b) => (a.featured_rank ?? 0) - (b.featured_rank ?? 0));
+  const fixtureMarketIds = new Set(matches.map((m) => m.id));
+  const globalMarkets = markets.filter((m) => !m.match_id || !fixtureMarketIds.has(m.match_id));
 
   return (
     <div className="min-h-screen">
@@ -103,8 +105,48 @@ export default function MarketsIndex() {
             markets={markets.filter((m) => m.match_id === match.id)}
           />
         ))}
+        {!loading && !error && globalMarkets.length > 0 && (
+          <GlobalMarketsSection markets={globalMarkets} />
+        )}
       </main>
     </div>
+  );
+}
+
+function GlobalMarketsSection({ markets }: { markets: Market[] }) {
+  const binaries = markets.filter((m) => m.type === "binary");
+  const pools = markets.filter((m) => m.type === "precision");
+
+  return (
+    <section className="rule-t py-6">
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <h2 className="text-[17px] font-bold tracking-tight">World Cup markets</h2>
+        <span className="shrink-0 font-mono text-[11px] uppercase tracking-[0.1em] text-dim">
+          competition · player · custom
+        </span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {binaries.map((m) => (
+          <GlobalBinaryCard key={m.market_id} m={m} />
+        ))}
+        {pools.map((m) => (
+          <Link key={m.market_id} href={`/precision/${m.market_id}`} className={cardLink}>
+            <span className="line-clamp-2 min-w-0 text-[13.5px] leading-snug text-ink transition-colors group-hover:text-accent">
+              {m.title}
+            </span>
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+                {m.scope ?? kindOf(m)}
+              </span>
+              <span className="flex items-center gap-2">
+                <StarButton marketId={m.market_id} />
+                <PrecisionState market={m} />
+              </span>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -228,6 +270,52 @@ function BinaryCard({ m, match }: { m: Market; match: Match }) {
       <div className="mt-3 flex items-center justify-between gap-2">
         <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
           {kindOf(m)}
+        </span>
+        <span className="flex items-center gap-2">
+          <StarButton marketId={m.market_id} />
+          <MarketState market={m} />
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+function GlobalBinaryCard({ m }: { m: Market }) {
+  if (m.status === "open") {
+    return (
+      <div className={cardBox}>
+        <Link
+          href={`/market/${m.market_id}`}
+          className="line-clamp-2 min-w-0 text-[13.5px] leading-snug text-ink transition-colors hover:text-accent"
+        >
+          {m.title}
+        </Link>
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+            {m.scope ?? kindOf(m)}
+            {m.subject_id ? ` · ${m.subject_id}` : ""}
+          </span>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <StarButton marketId={m.market_id} />
+            <Link href={`/market/${m.market_id}?o=yes`} className={yesBtn}>
+              Yes
+            </Link>
+            <Link href={`/market/${m.market_id}?o=no`} className={noBtn}>
+              No
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <Link href={`/market/${m.market_id}`} className={cardLink}>
+      <span className="line-clamp-2 min-w-0 text-[13.5px] leading-snug text-ink transition-colors group-hover:text-accent">
+        {m.title}
+      </span>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+          {m.scope ?? kindOf(m)}
         </span>
         <span className="flex items-center gap-2">
           <StarButton marketId={m.market_id} />
