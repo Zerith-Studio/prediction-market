@@ -18,6 +18,7 @@ import (
 	"github.com/Zerith-Studio/prediction-market/backend/internal/exchange"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/feed/txodds"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/lifecycle"
+	"github.com/Zerith-Studio/prediction-market/backend/internal/marketdefs"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/matching"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/models"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/rfq"
@@ -39,9 +40,9 @@ type Server struct {
 	hub       *ws.Hub
 	rfq       *rfq.Service
 	lifecycle *lifecycle.Service
-	chain     *crank.ChainOps        // nil = off-chain mirror mode
-	fixtures  FixtureSource          // nil = admin fixture browser disabled
-	admin     *adminAuth             // operator-wallet gate for /admin (nil until WithAdmin)
+	chain     *crank.ChainOps         // nil = off-chain mirror mode
+	fixtures  FixtureSource           // nil = admin fixture browser disabled
+	admin     *adminAuth              // operator-wallet gate for /admin (nil until WithAdmin)
 	pricer    lifecycle.FairPriceSink // MM bot's fair-price sink (admin manual pricing); nil = disabled
 	log       *slog.Logger
 }
@@ -136,6 +137,11 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /balance", s.handleBalance)
 	mux.HandleFunc("GET /portfolio", s.handlePortfolio)
 
+	// Watchlist
+	mux.HandleFunc("GET /watchlist", s.handleGetWatchlist)
+	mux.HandleFunc("POST /watchlist", s.handleAddWatch)
+	mux.HandleFunc("DELETE /watchlist/{market_id}", s.handleRemoveWatch)
+
 	// Admin — operator-gated manual market control (auth in admin.go)
 	mux.HandleFunc("GET /admin/challenge", s.handleAdminChallenge)
 	mux.HandleFunc("POST /admin/session", s.handleAdminSession)
@@ -143,7 +149,9 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /admin/fixtures/{id}/odds", s.adminGuard(s.handleAdminFixtureOdds))
 	mux.HandleFunc("POST /admin/fixtures/{id}/markets", s.adminGuard(s.handleAdminCreateMarkets))
 	mux.HandleFunc("POST /admin/fixtures/{id}/resolve", s.adminGuard(s.handleAdminResolveFixture))
+	mux.HandleFunc("GET /admin/market-definitions", s.adminGuard(s.handleAdminMarketDefinitions))
 	mux.HandleFunc("GET /admin/markets", s.adminGuard(s.handleAdminMarkets))
+	mux.HandleFunc("POST /admin/markets/custom", s.adminGuard(s.handleAdminCreateCustomMarket))
 	mux.HandleFunc("POST /admin/markets/{id}/resolve", s.adminGuard(s.handleAdminResolveMarket))
 	mux.HandleFunc("POST /admin/markets/{id}/close", s.adminGuard(s.handleAdminCloseMarket))
 	mux.HandleFunc("POST /admin/markets/{id}/cancel-orders", s.adminGuard(s.handleAdminCancelOrders))
@@ -157,6 +165,10 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.Handle("GET /ws", s.hub.Handler())
 
 	return mux
+}
+
+func (s *Server) handleAdminMarketDefinitions(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"definitions": marketdefs.Registry()})
 }
 
 // ---- wire DTOs ----
@@ -335,6 +347,12 @@ func marketJSON(m store.MarketRow) map[string]any {
 		"id": m.ID, "market_id": models.HashString(m.MarketID), "match_id": m.MatchID,
 		"template_key": m.TemplateKey, "type": m.Type, "title": m.Title,
 		"rule": m.Rule, "status": m.Status, "created_at": m.CreatedAt,
+		"scope": m.Scope, "competition_id": m.CompetitionID,
+		"subject_type": m.SubjectType, "subject_id": m.SubjectID,
+		"resolution_source": m.ResolutionSource,
+	}
+	if len(m.RuleJSON) > 0 {
+		out["rule_json"] = json.RawMessage(m.RuleJSON)
 	}
 	if len(m.Outcome) > 0 && string(m.Outcome) != "null" {
 		out["outcome"] = json.RawMessage(m.Outcome)
@@ -885,6 +903,74 @@ func (s *Server) handlePortfolio(w http.ResponseWriter, r *http.Request) {
 		"combos":    escOut,
 		"precision": precOut,
 	})
+}
+
+// handleGetWatchlist returns a wallet's watched market ids (64-hex), newest first.
+func (s *Server) handleGetWatchlist(w http.ResponseWriter, r *http.Request) {
+	wallet := r.URL.Query().Get("wallet")
+	if _, err := models.ParsePubkey(wallet); err != nil {
+		httpError(w, http.StatusBadRequest, "wallet query param: "+err.Error())
+		return
+	}
+	ids, err := s.store.Watchlist(r.Context(), wallet)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = models.HashString(id)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"market_ids": out})
+}
+
+// handleAddWatch favourites a market for a wallet. Body: {wallet, market_id}.
+func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Wallet   string `json:"wallet"`
+		MarketID string `json:"market_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpError(w, http.StatusBadRequest, "bad json: "+err.Error())
+		return
+	}
+	if _, err := models.ParsePubkey(body.Wallet); err != nil {
+		httpError(w, http.StatusBadRequest, "wallet: "+err.Error())
+		return
+	}
+	marketID, err := models.ParseHash(body.MarketID)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "market_id: "+err.Error())
+		return
+	}
+	if err := s.store.AddWatch(r.Context(), body.Wallet, marketID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			httpError(w, http.StatusBadRequest, "unknown market")
+			return
+		}
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleRemoveWatch unfavourites a market. Path: market_id; query: wallet.
+func (s *Server) handleRemoveWatch(w http.ResponseWriter, r *http.Request) {
+	wallet := r.URL.Query().Get("wallet")
+	if _, err := models.ParsePubkey(wallet); err != nil {
+		httpError(w, http.StatusBadRequest, "wallet query param: "+err.Error())
+		return
+	}
+	marketID, err := models.ParseHash(r.PathValue("market_id"))
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "market_id: "+err.Error())
+		return
+	}
+	if err := s.store.RemoveWatch(r.Context(), wallet, marketID); err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // ---- helpers ----
