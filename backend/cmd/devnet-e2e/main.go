@@ -285,10 +285,10 @@ func (e *env) crossOrders(marketID [32]byte, alice, bob *solana.Wallet) (matchin
 		return o
 	}
 	book := matching.NewBook(marketID)
-	if _, err := book.Submit(mkOrder(bob, models.OutcomeNo, noPrice, 1)); err != nil {
+	if _, _, err := book.Submit(mkOrder(bob, models.OutcomeNo, noPrice, 1)); err != nil {
 		return matching.Fill{}, err
 	}
-	fills, err := book.Submit(mkOrder(alice, models.OutcomeYes, yesPrice, 2))
+	fills, _, err := book.Submit(mkOrder(alice, models.OutcomeYes, yesPrice, 2))
 	if err != nil {
 		return matching.Fill{}, err
 	}

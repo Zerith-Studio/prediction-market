@@ -76,7 +76,7 @@ func TestRequotePostsTwoSidedMintLiquidity(t *testing.T) {
 		Side: models.SideBuy, Price: 58, Size: 40, Salt: 9,
 	}
 	models.SignOrder(o, takerPriv)
-	_, fills, err := f.ex.SubmitOrder(context.Background(), o)
+	_, fills, _, err := f.ex.SubmitOrder(context.Background(), o)
 	if err != nil {
 		t.Fatal(err)
 	}
