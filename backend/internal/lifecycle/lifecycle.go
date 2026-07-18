@@ -157,6 +157,17 @@ func (s *Service) handleEvent(ctx context.Context, fixtureID string, ev feed.Mat
 			return err
 		}
 
+	case feed.EventHalfTime:
+		// Settle markets whose outcome is final at the break (1H markets). The
+		// full-time cascade re-settles idempotently if this event is ever missed.
+		var ht FinalScore
+		if err := json.Unmarshal(raw, &ht); err != nil {
+			return err
+		}
+		if err := s.ResolveHalfTime(ctx, fixtureID, ht); err != nil {
+			return err
+		}
+
 	case feed.EventFullTime:
 		if err := s.store.SetMatchState(ctx, fixtureID, "finished", raw); err != nil {
 			return err
@@ -248,6 +259,55 @@ func (s *Service) ResolveFixture(ctx context.Context, fixtureID string, final Fi
 	}
 	s.log.Info("lifecycle: fixture resolved", "fixture", fixtureID,
 		"score", fmt.Sprintf("%d-%d", final.HomeGoals, final.AwayGoals))
+	return nil
+}
+
+// ResolveHalfTime settles the templates whose outcome is final at half time
+// (ResolvesAt == "half_time") from the HT score, so 1H bets pay out at the break
+// instead of waiting for full time. Idempotent (skips already-settled markets);
+// the full-time cascade — which also walks these templates — is the guaranteed
+// fallback for anything this misses (e.g. a dropped EventHalfTime).
+func (s *Service) ResolveHalfTime(ctx context.Context, fixtureID string, ht FinalScore) error {
+	resolved := 0
+	for _, t := range templates.Registry {
+		if t.ResolvesAt != "half_time" || t.Type != "binary" {
+			continue
+		}
+		marketID := templates.MarketID(fixtureID, t.Key)
+		if cur, err := s.store.GetMarket(ctx, marketID); err == nil &&
+			(cur.Status == "settled" || cur.Status == "void") {
+			continue
+		}
+		result, ok := binaryOutcome(t.Key, ht)
+		if !ok {
+			continue
+		}
+		outcome := map[string]uint8{"no": 0, "yes": 1, "void": 2}[result]
+		status := "settled"
+		if result == "void" {
+			status = "void"
+		}
+		txSig, err := s.resolver.ResolveMarket(ctx, marketID, outcome)
+		if err != nil {
+			s.log.Error("lifecycle: HT on-chain resolve failed", "template", t.Key, "err", err)
+			// keep going: off-chain state still settles; index reconciles later
+		}
+		outcomeJSON, _ := json.Marshal(map[string]any{
+			"result":   result,
+			"ht_score": fmt.Sprintf("%d-%d", ht.HTHomeGoals, ht.HTAwayGoals),
+		})
+		if err := s.store.SettleMarket(ctx, marketID, outcomeJSON, txSig, status); err != nil {
+			return err
+		}
+		resolved++
+	}
+	if resolved > 0 && s.rfq != nil {
+		if err := s.rfq.ResolveSettled(ctx); err != nil {
+			return err
+		}
+	}
+	s.log.Info("lifecycle: half-time markets resolved", "fixture", fixtureID,
+		"count", resolved, "ht_score", fmt.Sprintf("%d-%d", ht.HTHomeGoals, ht.HTAwayGoals))
 	return nil
 }
 
@@ -363,8 +423,38 @@ func binaryOutcome(templateKey string, f FinalScore) (string, bool) {
 			return "void", true
 		}
 		return yn(f.HomeGoals > f.AwayGoals), true
+	case "dnb_away":
+		if f.HomeGoals == f.AwayGoals {
+			return "void", true
+		}
+		return yn(f.AwayGoals > f.HomeGoals), true
+	case "dc_1x": // home or draw
+		return yn(f.HomeGoals >= f.AwayGoals), true
+	case "dc_12": // any winner — settles NO only on a draw
+		return yn(f.HomeGoals != f.AwayGoals), true
+	case "dc_x2": // draw or away
+		return yn(f.AwayGoals >= f.HomeGoals), true
+	case "over_1_5":
+		return yn(f.HomeGoals+f.AwayGoals >= 2), true
+	case "over_3_5":
+		return yn(f.HomeGoals+f.AwayGoals >= 4), true
+	case "cs_home": // home clean sheet: away scored 0
+		return yn(f.AwayGoals == 0), true
+	case "cs_away": // away clean sheet: home scored 0
+		return yn(f.HomeGoals == 0), true
+	// half-time markets (read the HT score fields)
+	case "ht_home":
+		return yn(f.HTHomeGoals > f.HTAwayGoals), true
+	case "ht_draw":
+		return yn(f.HTHomeGoals == f.HTAwayGoals), true
+	case "ht_away":
+		return yn(f.HTAwayGoals > f.HTHomeGoals), true
 	case "ou_1h_075":
 		return yn(f.HTHomeGoals+f.HTAwayGoals >= 1), true
+	case "ou_1h_15":
+		return yn(f.HTHomeGoals+f.HTAwayGoals >= 2), true
+	case "btts_1h":
+		return yn(f.HTHomeGoals > 0 && f.HTAwayGoals > 0), true
 	}
 	return "", false
 }

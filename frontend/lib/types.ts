@@ -126,6 +126,8 @@ export interface Position {
   title: string;
   yes: number;
   no: number;
+  yes_locked: number; // shares already committed to resting SELL orders
+  no_locked: number;
   avg_cost: number; // cents
   current: number; // cents — best bid (BBP): the price the position exits at now
   realized: number; // micro-USDC, booked on sells

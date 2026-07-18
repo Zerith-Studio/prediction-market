@@ -206,3 +206,51 @@ func walletPair(b byte) ([32]byte, string) {
 	pk[0], pk[31] = b, 0xFF
 	return pk, models.PubkeyString(pk)
 }
+
+// TestHalfTimeResolvesEarly: 1H markets settle at the break; full-time markets do
+// not, and the full-time cascade is idempotent on the already-settled HT ones.
+func TestHalfTimeResolvesEarly(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.Open(t)
+	log := slog.Default()
+	svc := lifecycle.New(st, ws.NewHub(log), nil, nil, nil, log)
+
+	const fixture = "ht-demo"
+	if err := svc.RegisterFixture(ctx, fixture, "Argentina", "France", time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("RegisterFixture: %v", err)
+	}
+
+	// Half-time 1-0: settle the 1H markets from the HT score.
+	if err := svc.ResolveHalfTime(ctx, fixture, lifecycle.FinalScore{HTHomeGoals: 1, HTAwayGoals: 0}); err != nil {
+		t.Fatalf("ResolveHalfTime: %v", err)
+	}
+
+	htHome, err := st.GetMarket(ctx, templates.MarketID(fixture, "ht_home"))
+	if err != nil {
+		t.Fatalf("get ht_home: %v", err)
+	}
+	if htHome.Status != "settled" {
+		t.Fatalf("ht_home must settle at half-time, got %q", htHome.Status)
+	}
+	// A full-time market must be untouched at half-time.
+	homeWin, err := st.GetMarket(ctx, templates.MarketID(fixture, "home_win"))
+	if err != nil {
+		t.Fatalf("get home_win: %v", err)
+	}
+	if homeWin.Status == "settled" || homeWin.Status == "void" {
+		t.Fatalf("full-time home_win must NOT resolve at half-time, got %q", homeWin.Status)
+	}
+
+	// The full-time cascade re-runs over every template, including the HT ones — it
+	// must be a safe no-op on the already-settled HT market, and settle the FT ones.
+	if err := svc.ResolveFixture(ctx, fixture,
+		lifecycle.FinalScore{HomeGoals: 2, AwayGoals: 0, HTHomeGoals: 1, HTAwayGoals: 0}); err != nil {
+		t.Fatalf("ResolveFixture after HT: %v", err)
+	}
+	if m, _ := st.GetMarket(ctx, templates.MarketID(fixture, "ht_home")); m.Status != "settled" {
+		t.Errorf("ht_home must stay settled after the FT cascade, got %q", m.Status)
+	}
+	if m, _ := st.GetMarket(ctx, templates.MarketID(fixture, "home_win")); m.Status != "settled" {
+		t.Errorf("home_win must settle at full time, got %q", m.Status)
+	}
+}

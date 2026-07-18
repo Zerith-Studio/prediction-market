@@ -11,6 +11,11 @@ const (
 	EventScore    EventType = "score"
 	EventKickoff  EventType = "kickoff"
 	EventFullTime EventType = "full_time"
+	// EventHalfTime fires once the half-time score is final, carrying the same
+	// score payload as EventScore. It lets markets whose outcome is decided at the
+	// break settle early (lifecycle.ResolveHalfTime); the live_state still updates
+	// via the EventScore emitted alongside it.
+	EventHalfTime EventType = "half_time"
 	EventOdds     EventType = "odds"
 	// EventLineup carries a fixture's team sheets (starting XI + substitutes).
 	// Emitted once when the feed first delivers lineups; persisted separately

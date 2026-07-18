@@ -562,6 +562,45 @@ func TestCancelReleasesLock(t *testing.T) {
 	}
 }
 
+// TestSettleReleasesRestingOrders: resolving a market cancels every resting order
+// and returns each maker's soft-locked collateral (a settled market can't match).
+func TestSettleReleasesRestingOrders(t *testing.T) {
+	s := storetest.Open(t)
+	var marketID [32]byte
+	marketID[0] = 11
+	seedMarket(t, s, marketID)
+
+	pk1, w1 := wallet(1)
+	pk2, w2 := wallet(2)
+	s.Deposit(ctx, w1, 50_000_000)
+	s.Deposit(ctx, w2, 50_000_000)
+
+	// Two resting BUYs (opposite outcomes) lock collateral.
+	if err := s.PlaceOrder(ctx, order(pk1, marketID, models.OutcomeYes, models.SideBuy, 50, 80, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PlaceOrder(ctx, order(pk2, marketID, models.OutcomeNo, models.SideBuy, 30, 100, 2)); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := s.GetBalance(ctx, w1); b.Locked == 0 {
+		t.Fatalf("w1 collateral should be locked before settle: %+v", b)
+	}
+	if b, _ := s.GetBalance(ctx, w2); b.Locked == 0 {
+		t.Fatalf("w2 collateral should be locked before settle: %+v", b)
+	}
+
+	// Resolve the market → resting orders cancelled, all collateral returned.
+	if err := s.SettleMarket(ctx, marketID, []byte(`{"result":"yes"}`), "", "settled"); err != nil {
+		t.Fatalf("SettleMarket: %v", err)
+	}
+	if b, _ := s.GetBalance(ctx, w1); b.Available != 50_000_000 || b.Locked != 0 {
+		t.Errorf("w1 after settle: %+v (want available 50m, locked 0)", b)
+	}
+	if b, _ := s.GetBalance(ctx, w2); b.Available != 50_000_000 || b.Locked != 0 {
+		t.Errorf("w2 after settle: %+v (want available 50m, locked 0)", b)
+	}
+}
+
 func TestComboLifecycle(t *testing.T) {
 	s := storetest.Open(t)
 	var m1, m2 [32]byte
