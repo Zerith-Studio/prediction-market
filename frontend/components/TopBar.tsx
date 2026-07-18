@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Menu } from "lucide-react";
 import { CommandPalette, SearchIcon } from "@/components/CommandPalette";
+import { Avatar } from "@/components/Avatar";
 import { usd } from "@/lib/format";
 import { usePitchWallet } from "@/lib/wallet";
 
@@ -36,7 +38,8 @@ export function TopBar({ balanceMicro }: { balanceMicro: number }) {
   return (
     <header className="sticky top-0 z-40 rule-b bg-bg/85 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-[1200px] items-center justify-between px-5 sm:px-8">
-        <div className="flex items-center gap-8">
+        <div className="flex items-center gap-3 md:gap-8">
+          <MobileNav isActive={isActive} />
           <Link
             href="/"
             className="font-mono text-[13px] font-bold uppercase tracking-[0.24em] text-ink"
@@ -102,6 +105,64 @@ export function TopBar({ balanceMicro }: { balanceMicro: number }) {
   );
 }
 
+// The primary nav is hidden on phones; this hamburger reveals it in a dropdown
+// so the app stays navigable on mobile.
+function MobileNav({ isActive }: { isActive: (href: string) => boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative md:hidden" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Menu"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex items-center text-dim transition-colors hover:text-ink"
+      >
+        <Menu size={18} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 top-full z-50 mt-2 w-[172px] rounded-[3px] border border-line2 bg-bg shadow-2xl"
+        >
+          {NAV.map((item) => (
+            <Link
+              key={item.label}
+              href={item.href}
+              role="menuitem"
+              aria-current={isActive(item.href) ? "page" : undefined}
+              onClick={() => setOpen(false)}
+              className={`block px-3 py-2.5 text-[13px] transition-colors hover:bg-line/70 ${
+                isActive(item.href) ? "text-ink" : "text-dim hover:text-ink"
+              }`}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function short(addr: string): string {
   return `${addr.slice(0, 4)}…${addr.slice(-4)}`;
 }
@@ -152,11 +213,11 @@ function WalletMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         title="Wallet"
-        className="font-mono text-[12.5px] text-muted transition-colors hover:text-ink"
+        className="flex items-center gap-1.5 font-mono text-[12.5px] text-muted transition-colors hover:text-ink"
       >
-        <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-accent align-middle" />
+        <Avatar seed={address} size={18} />
         {short(address)}
-        {isDemo && <span className="ml-1.5 text-dim">demo</span>}
+        {isDemo && <span className="text-dim">demo</span>}
       </button>
 
       {open && (

@@ -9,10 +9,13 @@ import { MatchCentre } from "@/components/MatchCentre";
 import { PriceChart } from "@/components/PriceChart";
 import { OrderBook } from "@/components/OrderBook";
 import { RecentFills } from "@/components/RecentFills";
+import { Comments } from "@/components/Comments";
 import { TradePanel } from "@/components/TradePanel";
+import { MarketPositions } from "@/components/MarketPositions";
 import { PitchTicker } from "@/components/PitchTicker";
 import { MarketSkeleton } from "@/components/Skeletons";
 import { usePitchWallet } from "@/lib/wallet";
+import { useState } from "react";
 
 export default function MarketPage({
   params,
@@ -24,6 +27,9 @@ export default function MarketPage({
   const wallet = usePitchWallet();
   const m = useLiveMarket(params.id, wallet.address);
   const up = m.priceDelta >= 0;
+  // Bumped whenever an order is placed/exited/cancelled so the market-level
+  // position panel refetches immediately instead of waiting for its poll.
+  const [posRefresh, setPosRefresh] = useState(0);
   // A card's Yes/No button deep-links here with ?o=yes|no to preselect the side.
   const initialOutcome: 0 | 1 = searchParams?.o === "no" ? 0 : 1;
 
@@ -84,9 +90,9 @@ export default function MarketPage({
                   <PriceChart data={m.history} up={up} />
                 </div>
 
-                {/* right: trade panel */}
+                {/* right: trade panel + your position in this market */}
                 <div className="lg:col-span-1">
-                  <div className="lg:sticky lg:top-[76px]">
+                  <div className="space-y-5 lg:sticky lg:top-[76px]">
                     <TradePanel
                       marketId={params.id}
                       marketTitle={m.market.title}
@@ -94,8 +100,12 @@ export default function MarketPage({
                       balanceMicro={m.balanceMicro}
                       marketStatus={m.market.status}
                       initialOutcome={initialOutcome}
-                      onPlaced={m.refreshBalance}
+                      onPlaced={() => {
+                        m.refreshBalance();
+                        setPosRefresh((n) => n + 1);
+                      }}
                     />
+                    <MarketPositions marketId={params.id} refreshKey={posRefresh} />
                   </div>
                 </div>
               </div>
@@ -110,6 +120,9 @@ export default function MarketPage({
               <OrderBook book={m.book} flashId={m.lastFillId} flashSide={m.lastFillSide} />
               <RecentFills fills={m.fills} yesPrice={m.yesPrice} />
             </div>
+
+            {/* per-market discussion */}
+            <Comments marketId={params.id} />
 
             <footer className="rule-t py-6 font-mono text-[11px] text-dim">
               {m.market.rule}

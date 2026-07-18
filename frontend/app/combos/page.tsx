@@ -204,9 +204,14 @@ export default function CombosPage() {
           </section>
 
           {/* slip */}
-          <aside className="lg:rule-l lg:pl-10">
-            <div className="lg:sticky lg:top-[76px]">
-              <h2 className="mb-5 text-[13px] font-semibold">Your combo</h2>
+          <aside>
+            <div className="border border-line p-5 sm:p-6 lg:sticky lg:top-[76px]">
+              <div className="mb-6">
+                <div className="eyebrow">Your combo</div>
+                <h2 className="mt-1 text-[15px] font-semibold text-ink">
+                  {legs.length ? `${legs.length}-leg parlay` : "Build a parlay"}
+                </h2>
+              </div>
 
               {legs.length === 0 && (
                 <p className="text-[13px] leading-relaxed text-muted">
@@ -247,24 +252,22 @@ export default function CombosPage() {
 
               {legs.length > 0 && state === "build" && (
                 <>
-                  <label className="mb-5 mt-6 block">
-                    <span className="mb-1 flex justify-between font-mono text-[11px] text-muted">
-                      <span>Stake</span>
-                      <span className="text-dim">USDC</span>
-                    </span>
-                    <div className="flex items-baseline border-b border-line2 pb-1.5 focus-within:border-accent">
-                      <input
-                        inputMode="numeric"
-                        value={stake}
-                        onChange={(e) => setStake(e.target.value.replace(/[^0-9]/g, ""))}
-                        className="w-full bg-transparent font-mono text-[22px] font-light text-ink outline-none tnum"
-                      />
-                    </div>
-                  </label>
+                  <div className="mb-1 mt-6 flex items-baseline justify-between">
+                    <span className="eyebrow">Stake</span>
+                    <span className="font-mono text-[11px] text-dim">USDC</span>
+                  </div>
+                  <div className="mb-6 flex items-baseline border-b border-line2 pb-1.5 transition-colors focus-within:border-accent">
+                    <input
+                      inputMode="numeric"
+                      value={stake}
+                      onChange={(e) => setStake(e.target.value.replace(/[^0-9]/g, ""))}
+                      className="w-full bg-transparent font-mono text-[40px] font-light leading-none text-ink outline-none tnum"
+                    />
+                  </div>
                   <button
                     onClick={requestQuote}
                     disabled={legs.length < 2 || stakeMicro === 0}
-                    className="w-full bg-accent px-5 py-3.5 text-[14px] font-semibold text-bg transition-[transform,filter] duration-150 ease-out-strong hover:brightness-110 enabled:active:scale-[0.98] disabled:bg-line2 disabled:text-dim"
+                    className="w-full bg-ink px-5 py-3.5 text-[14px] font-semibold text-bg transition-[transform,filter] duration-150 ease-out-strong hover:brightness-90 enabled:active:scale-[0.98] disabled:bg-line2 disabled:text-dim"
                   >
                     {wallet.address ? `Request quote · ${legs.length} legs` : "Connect wallet"}
                   </button>
@@ -373,7 +376,7 @@ function QuoteCard({
       </dl>
       <button
         onClick={onAccept}
-        className="mt-4 w-full bg-accent px-5 py-3.5 text-[14px] font-semibold text-bg transition-[transform,filter] duration-150 ease-out-strong hover:brightness-110 active:scale-[0.98]"
+        className="mt-4 w-full bg-ink px-5 py-3.5 text-[14px] font-semibold text-bg transition-[transform,filter] duration-150 ease-out-strong hover:brightness-90 active:scale-[0.98]"
       >
         Accept quote
       </button>
