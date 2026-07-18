@@ -14,6 +14,7 @@ import { TradePanel } from "@/components/TradePanel";
 import { MarketPositions } from "@/components/MarketPositions";
 import { PitchTicker } from "@/components/PitchTicker";
 import { MarketSkeleton } from "@/components/Skeletons";
+import { StarButton } from "@/components/StarButton";
 import { usePitchWallet } from "@/lib/wallet";
 import { useState } from "react";
 
@@ -54,11 +55,14 @@ export default function MarketPage({
                 <div className="min-w-0 lg:col-span-2">
                   <div className="mb-8 flex items-end justify-between gap-6">
                     <div>
-                      <div className="mb-3 flex items-baseline gap-2">
-                        <h1 className="text-[15px] font-semibold text-ink">
-                          {m.market.title}
-                        </h1>
-                        <span className="eyebrow">binary · on-chain</span>
+                      <div className="mb-3 flex items-center gap-2">
+                        <div className="flex items-baseline gap-2">
+                          <h1 className="text-[15px] font-semibold text-ink">
+                            {m.market.title}
+                          </h1>
+                          <span className="eyebrow">binary · on-chain</span>
+                        </div>
+                        <StarButton marketId={params.id} />
                       </div>
                       <div className="flex items-baseline gap-3">
                         <span className="font-mono text-[46px] font-light leading-none text-ink tnum sm:text-[64px]">

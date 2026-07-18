@@ -206,3 +206,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_seed TEXT;
 UPDATE users SET avatar_seed = wallet WHERE avatar_seed IS NULL;
 -- comments existed before author-edit; add edited_at on existing DBs.
 ALTER TABLE comments ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+
+-- Per-wallet market watchlist (UI preference; chain stays authoritative for money).
+CREATE TABLE IF NOT EXISTS watchlists (
+    wallet     TEXT  NOT NULL,
+    market_id  BYTEA NOT NULL REFERENCES markets(market_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (wallet, market_id)
+);

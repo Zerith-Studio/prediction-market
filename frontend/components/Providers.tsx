@@ -3,6 +3,7 @@
 import { MotionConfig } from "framer-motion";
 import { Toaster } from "sonner";
 import { PitchWalletProvider } from "@/lib/wallet";
+import { WatchlistProvider } from "@/lib/watchlist";
 
 /**
  * MotionConfig reducedMotion="user": the globals.css kill-switch only zeroes
@@ -14,7 +15,9 @@ import { PitchWalletProvider } from "@/lib/wallet";
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <MotionConfig reducedMotion="user">
-      <PitchWalletProvider>{children}</PitchWalletProvider>
+      <PitchWalletProvider>
+        <WatchlistProvider>{children}</WatchlistProvider>
+      </PitchWalletProvider>
       {/* Global action toasts (order / fill / self-trade / cancel / deposit).
           Text-only — no icons/emoji; meaning comes from the semantic color
           (green fill, red error, amber self-trade prevention). */}

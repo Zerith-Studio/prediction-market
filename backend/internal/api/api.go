@@ -144,6 +144,11 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /balance", s.handleBalance)
 	mux.HandleFunc("GET /portfolio", s.handlePortfolio)
 
+	// Watchlist
+	mux.HandleFunc("GET /watchlist", s.handleGetWatchlist)
+	mux.HandleFunc("POST /watchlist", s.handleAddWatch)
+	mux.HandleFunc("DELETE /watchlist/{market_id}", s.handleRemoveWatch)
+
 	// Admin — operator-gated manual market control (auth in admin.go)
 	mux.HandleFunc("GET /admin/challenge", s.handleAdminChallenge)
 	mux.HandleFunc("POST /admin/session", s.handleAdminSession)
@@ -921,6 +926,74 @@ func (s *Server) handlePortfolio(w http.ResponseWriter, r *http.Request) {
 		"combos":    escOut,
 		"precision": precOut,
 	})
+}
+
+// handleGetWatchlist returns a wallet's watched market ids (64-hex), newest first.
+func (s *Server) handleGetWatchlist(w http.ResponseWriter, r *http.Request) {
+	wallet := r.URL.Query().Get("wallet")
+	if _, err := models.ParsePubkey(wallet); err != nil {
+		httpError(w, http.StatusBadRequest, "wallet query param: "+err.Error())
+		return
+	}
+	ids, err := s.store.Watchlist(r.Context(), wallet)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = models.HashString(id)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"market_ids": out})
+}
+
+// handleAddWatch favourites a market for a wallet. Body: {wallet, market_id}.
+func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Wallet   string `json:"wallet"`
+		MarketID string `json:"market_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpError(w, http.StatusBadRequest, "bad json: "+err.Error())
+		return
+	}
+	if _, err := models.ParsePubkey(body.Wallet); err != nil {
+		httpError(w, http.StatusBadRequest, "wallet: "+err.Error())
+		return
+	}
+	marketID, err := models.ParseHash(body.MarketID)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "market_id: "+err.Error())
+		return
+	}
+	if err := s.store.AddWatch(r.Context(), body.Wallet, marketID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			httpError(w, http.StatusBadRequest, "unknown market")
+			return
+		}
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleRemoveWatch unfavourites a market. Path: market_id; query: wallet.
+func (s *Server) handleRemoveWatch(w http.ResponseWriter, r *http.Request) {
+	wallet := r.URL.Query().Get("wallet")
+	if _, err := models.ParsePubkey(wallet); err != nil {
+		httpError(w, http.StatusBadRequest, "wallet query param: "+err.Error())
+		return
+	}
+	marketID, err := models.ParseHash(r.PathValue("market_id"))
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "market_id: "+err.Error())
+		return
+	}
+	if err := s.store.RemoveWatch(r.Context(), wallet, marketID); err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // ---- helpers ----
