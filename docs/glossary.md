@@ -15,8 +15,8 @@ Living domain vocabulary. Terms are precise and should be used consistently in c
 | **Pair mint** | Creating 1 YES + 1 NO from $1 collateral when complementary orders match. | Keeps the book collateralized without an AMM. |
 | **Ledger** | Off-chain custodial balance system (integer cents). | Tracks `balance`, `locked`; double-entry audit trail. |
 | **Resolver** | Service that closes markets and computes outcomes from verified match data. | Holds the `resolver_authority` key for on-chain posting. |
-| **Settlement** | Applying outcomes to positions → payouts credited in ledger. | Also anchored on Solana (outcome + payout merkle root). |
-| **Resolution Registry** | Solana devnet Anchor program storing `(market_id, outcome, payout_root)`. | Makes results independently verifiable. TERM/DECISION pending grilling. |
+| **Settlement** | Applying outcomes to positions → payouts credited in ledger. | Also settled on Solana: outcome via `resolve_market`, positions via `settle_match` / `redeem`. |
+| **Resolution Registry** | Solana devnet Anchor program storing each market's `(market_id, outcome)` + on-chain settlement/redemption. | Makes results independently verifiable. |
 | **MM bot** | Automated market maker: quotes binary books and answers RFQs. | Counterparty model UNDER GRILLING (see open questions). |
 | **Feed provider** | Interface over match data; `txodds` (live) or `replay` (recorded) impl. | Demo safety net = replay. |
 | **Precision score** | σ-normalized closeness weight: `1/(1 + \|guess−actual\|/s)^k`, `s` = per-template scale. | Multiplied by stake → pool weight. σ-norm makes one `k` work across all stats (ADR 0006). |

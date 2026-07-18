@@ -58,6 +58,69 @@ func (s *Store) GrantTokens(ctx context.Context, wallet string, marketID [32]byt
 	return err
 }
 
+// redeemBinaryWinners pays out a resolved binary market off-chain, atomically with
+// settlement (called inside SettleMarket's tx): winning-outcome holders are
+// credited $1 (1e6 micro) per share, losing shares are worthless, and a VOID
+// refunds each holder what they paid (avg_cost). All positions on the market are
+// then cleared. On-chain, a winner redeems winning shares 1:1 via the `redeem` ix;
+// this is the off-chain mirror credit — the same auto-payout precision/combos use.
+func redeemBinaryWinners(ctx context.Context, tx pgx.Tx, marketID []byte, result string) error {
+	if result != "yes" && result != "no" && result != "void" {
+		return nil // unknown/unset outcome — nothing to redeem
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT "user", yes, no, avg_cost FROM positions_cache
+		WHERE market_id = $1 AND (yes > 0 OR no > 0)`, marketID)
+	if err != nil {
+		return err
+	}
+	type holder struct {
+		wallet  string
+		yes, no int64
+		avgCost int64
+	}
+	// Collect first — the balance writes below can't run while the cursor is open.
+	var holders []holder
+	for rows.Next() {
+		var h holder
+		if err := rows.Scan(&h.wallet, &h.yes, &h.no, &h.avgCost); err != nil {
+			rows.Close()
+			return err
+		}
+		holders = append(holders, h)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	const microPerShare = 1_000_000 // a winning share redeems for $1
+	for _, h := range holders {
+		var payout int64
+		switch result {
+		case "yes":
+			payout = h.yes * microPerShare
+		case "no":
+			payout = h.no * microPerShare
+		case "void":
+			payout = (h.yes + h.no) * h.avgCost * 10_000 // refund cost (cents×shares→micro)
+		}
+		if payout <= 0 {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO balances (wallet, usdc_available) VALUES ($1,$2)
+			ON CONFLICT (wallet) DO UPDATE SET usdc_available = balances.usdc_available + $2`,
+			h.wallet, payout); err != nil {
+			return err
+		}
+	}
+	// Positions are settled: winning shares redeemed to USDC, losing shares void.
+	_, err = tx.Exec(ctx, `
+		UPDATE positions_cache SET yes = 0, no = 0, yes_locked = 0, no_locked = 0
+		WHERE market_id = $1`, marketID)
+	return err
+}
+
 func (s *Store) GetPositions(ctx context.Context, wallet string) ([]Position, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT "user", market_id, yes, no, yes_locked, no_locked, avg_cost, realized
