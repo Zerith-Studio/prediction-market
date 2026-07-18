@@ -38,7 +38,7 @@ and redemption are on-chain on Solana devnet.
 | Product | What it is | Settlement |
 |---|---|---|
 | **Binary markets** | YES/NO outcome markets per fixture template (e.g. draw-no-bet, over/under) | Fully on-chain: signed order → operator crank → `settle_match` → `resolve_market` → `redeem` |
-| **Combos (RFQ)** | Parlays: taker holds "all N legs win", an MM quotes the other side | Off-chain for the demo, behind an interface seam; the on-chain `combo_accept`/`resolve_combo` path is designed (ADR 0004) but stubbed |
+| **Combos (RFQ)** | Parlays: taker holds "all N legs win", an MM quotes the other side | Off-chain in the current build, behind an interface seam; the on-chain `combo_accept`/`resolve_combo` path is designed (ADR 0004) but stubbed |
 | **Precision pools** | Guess a match stat exactly; pool-based, winners paid by losers, σ-normalized closeness score | Off-chain (Tier 2 by design, ADR 0006) |
 
 ## Current status

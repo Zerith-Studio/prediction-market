@@ -38,7 +38,7 @@ settlement**. So resolution has an explicit build ladder:
 
 | Tier | Mechanism | Status |
 |---|---|---|
-| **(a)** single resolver key | operator-signed `resolve_market` | ✅ implemented; the demo floor |
+| **(a)** single resolver key | operator-signed `resolve_market` | ✅ implemented; the trustless floor |
 | **(d)** TxODDS-signed data | program verifies TxODDS's ed25519 signature on the outcome on-chain; operator collapses to a pure relay | 🔴 designed, gated on TxODDS providing signed data |
 | **(b)** commit-reveal + challenge window | UMA-lite fallback if (d) is unreachable | 🔴 not started |
 
@@ -55,7 +55,7 @@ reads, computes the AND on-chain, and pays the escrow. Negotiation is off-chain;
 and resolution are on-chain; no party is asked what a leg did.
 
 <Note>
-For the demo build, combos actually run off-chain behind an interface seam (the
+In the current build, combos actually run off-chain behind an interface seam (the
 on-chain `combo_accept` / `resolve_combo` instructions are typed stubs returning
 `NotImplemented`) — the cut order of ADR 0007. The trust claim above describes the
 designed on-chain path.
@@ -65,7 +65,7 @@ designed on-chain path.
 
 - **Precision pools** are off-chain by design (Tier 2, ADR 0006) — pool-based products
   have no priced complete set to escrow.
-- **Combos** run off-chain in the demo (see above).
+- **Combos** run off-chain in the current build (see above).
 - **Resolution** is tier-a: a single resolver key, held by the operator.
 
 The never-cut hill (ADR 0007): one match, one binary market, fully on-chain-trustless
