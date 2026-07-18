@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { Providers } from "@/components/Providers";
+import { Footer } from "@/components/Footer";
 import "./globals.css";
 
 const sans = Inter({
@@ -33,8 +34,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
-      <body>
-        <Providers>{children}</Providers>
+      <body className="flex min-h-screen flex-col">
+        <Providers>
+          <div className="flex flex-1 flex-col">{children}</div>
+          <Footer />
+        </Providers>
       </body>
     </html>
   );
