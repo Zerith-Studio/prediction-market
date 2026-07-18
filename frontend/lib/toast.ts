@@ -56,6 +56,12 @@ export const notify = {
     toast("Order cancelled", { description: "Removed from the book · collateral released" });
   },
 
+  claimed(amountMicro: number) {
+    toast.success("Winnings claimed", {
+      description: `$${(amountMicro / 1_000_000).toLocaleString()} redeemed on-chain to your wallet`,
+    });
+  },
+
   deposited(amountMicro: number) {
     toast.success("Deposit complete", {
       description: `$${(amountMicro / 1_000_000).toLocaleString()} added to your vault`,

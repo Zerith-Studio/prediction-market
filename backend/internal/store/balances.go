@@ -121,6 +121,70 @@ func redeemBinaryWinners(ctx context.Context, tx pgx.Tx, marketID []byte, result
 	return err
 }
 
+// RedeemBinaryWinners auto-pays every winner of a resolved binary market off-chain
+// — mirror mode only. On-chain, winners claim via the redeem ix (RedeemPosition),
+// so this must not run there or it would double-pay.
+func (s *Store) RedeemBinaryWinners(ctx context.Context, marketID [32]byte, result string) error {
+	return s.tx(ctx, func(tx pgx.Tx) error {
+		return redeemBinaryWinners(ctx, tx, marketID[:], result)
+	})
+}
+
+// RedeemPosition mirrors an on-chain redeem for ONE holder: credits their winning
+// shares at $1 each (VOID refunds avg_cost) and clears their position on the
+// market. Returns the amount credited (micro-USDC). Called by
+// /wallet/redeem-complete after the on-chain redeem confirms.
+func (s *Store) RedeemPosition(ctx context.Context, wallet string, marketID [32]byte, result string) (uint64, error) {
+	var credited int64
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		var yes, no, avgCost int64
+		e := tx.QueryRow(ctx, `
+			SELECT yes, no, avg_cost FROM positions_cache
+			WHERE "user" = $1 AND market_id = $2 FOR UPDATE`, wallet, marketID[:]).Scan(&yes, &no, &avgCost)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return nil // nothing held — no-op
+		}
+		if e != nil {
+			return e
+		}
+		switch result {
+		case "yes":
+			credited = yes * 1_000_000
+		case "no":
+			credited = no * 1_000_000
+		case "void":
+			credited = (yes + no) * avgCost * 10_000
+		}
+		if credited > 0 {
+			if _, e := tx.Exec(ctx, `
+				INSERT INTO balances (wallet, usdc_available) VALUES ($1,$2)
+				ON CONFLICT (wallet) DO UPDATE SET usdc_available = balances.usdc_available + $2`,
+				wallet, credited); e != nil {
+				return e
+			}
+		}
+		_, e = tx.Exec(ctx, `
+			UPDATE positions_cache SET yes = 0, no = 0, yes_locked = 0, no_locked = 0
+			WHERE "user" = $1 AND market_id = $2`, wallet, marketID[:])
+		return e
+	})
+	if err != nil {
+		return 0, err
+	}
+	return uint64(credited), nil
+}
+
+// PositionFor returns a wallet's held yes/no shares on one market (0 if none).
+func (s *Store) PositionFor(ctx context.Context, wallet string, marketID [32]byte) (yes, no uint64, err error) {
+	err = s.pool.QueryRow(ctx, `
+		SELECT COALESCE(yes,0), COALESCE(no,0) FROM positions_cache
+		WHERE "user" = $1 AND market_id = $2`, wallet, marketID[:]).Scan(&yes, &no)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, nil
+	}
+	return yes, no, err
+}
+
 func (s *Store) GetPositions(ctx context.Context, wallet string) ([]Position, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT "user", market_id, yes, no, yes_locked, no_locked, avg_cost, realized

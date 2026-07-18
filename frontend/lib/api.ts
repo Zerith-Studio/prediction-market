@@ -567,6 +567,27 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, await safeText(res));
   },
 
+  // ---- claim winnings on a resolved binary market (two-step user-signed redeem) ----
+  async redeemInit(
+    wallet: string,
+    marketId: string
+  ): Promise<{ redeem_id: string; message_b64: string; amount: number; outcome: string }> {
+    return post(`/wallet/redeem-init`, { wallet, market_id: marketId });
+  },
+  async redeemComplete(
+    redeemId: string,
+    wallet: string,
+    marketId: string,
+    sig: string
+  ): Promise<{ tx: string; amount: number }> {
+    return post(`/wallet/redeem-complete`, {
+      redeem_id: redeemId,
+      wallet,
+      market_id: marketId,
+      sig,
+    });
+  },
+
   // ---- real on-chain deposit (two-step; falls back to the mirror faucet
   // when the server runs off-chain) ----
   async depositInit(
