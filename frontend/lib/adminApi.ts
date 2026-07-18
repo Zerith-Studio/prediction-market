@@ -89,7 +89,7 @@ export interface AdminMarketBook {
 export interface AdminMarket {
   id: string;
   market_id: string; // 64-hex — the path id for resolve/close/cancel
-  match_id: string;
+  match_id?: string;
   template_key: string;
   type: "binary" | "precision";
   title: string;
@@ -100,6 +100,24 @@ export interface AdminMarket {
   created_at: string;
   featured_rank?: number | null; // set = pinned to the featured hero
   book?: AdminMarketBook;
+  scope?: "fixture" | "competition" | "team" | "player" | "custom";
+  competition_id?: string;
+  subject_type?: string;
+  subject_id?: string;
+  resolution_source?: string;
+  rule_json?: unknown;
+}
+
+export interface AdminMarketDefinition {
+  key: string;
+  scope: "fixture" | "competition" | "team" | "player" | "custom";
+  type: "binary" | "precision";
+  title_template: string;
+  rule_template: string;
+  resolution_source: string;
+  rule_json: unknown;
+  required_inputs_schema: unknown;
+  txline_requirements: string[];
 }
 
 export interface AdminOps {
@@ -120,6 +138,23 @@ export interface FinalScore {
   total_passes?: number;
   minute?: number;
   abandoned?: boolean;
+}
+
+export interface CreateCustomMarketInput {
+  scope: string;
+  fixture_id?: string;
+  home?: string;
+  away?: string;
+  kickoff?: string;
+  template_key: string;
+  type: "binary" | "precision";
+  title: string;
+  rule: string;
+  competition_id?: string;
+  subject_type?: string;
+  subject_id?: string;
+  resolution_source?: string;
+  rule_json?: unknown;
 }
 
 // ---- client -----------------------------------------------------------------
@@ -160,17 +195,31 @@ export const admin = {
       { home, away, kickoff },
     ).then((r) => r.markets ?? []),
 
+  marketDefinitions: () =>
+    req<{ definitions: AdminMarketDefinition[] }>(
+      "GET",
+      "/admin/market-definitions",
+    ).then((r) => r.definitions ?? []),
+
+  createCustomMarket: (input: CreateCustomMarketInput) =>
+    req<AdminMarket>("POST", "/admin/markets/custom", input),
+
   markets: (status = "") =>
     req<{ markets: AdminMarket[] }>(
       "GET",
       `/admin/markets${status ? `?status=${status}` : ""}`,
     ).then((r) => r.markets ?? []),
 
-  resolveMarket: (marketId: string, outcome: string, value?: number) =>
+  resolveMarket: (
+    marketId: string,
+    outcome: string,
+    value?: number,
+    evidence?: unknown,
+  ) =>
     req<{ market_id: string; tx: string }>(
       "POST",
       `/admin/markets/${marketId}/resolve`,
-      { outcome, value },
+      { outcome, value, evidence },
     ),
 
   closeMarket: (marketId: string) =>

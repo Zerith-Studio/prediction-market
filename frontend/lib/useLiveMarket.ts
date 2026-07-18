@@ -155,8 +155,19 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
     (async () => {
       try {
         const market = await api.getMarket(marketId);
+        const subject = market.subject_id ? titleCase(market.subject_id) : "";
+        const syntheticMatch: Match = {
+          id: "",
+          fixture_id: market.competition_id ? `competition-${market.competition_id}` : "global",
+          home: subject || market.title,
+          away: market.scope === "player" ? "World Cup field" : "World Cup",
+          kickoff_at: new Date().toISOString(),
+          status: "scheduled",
+          live_state: {},
+          lineups: null,
+        };
         const [match, book, fills, oneliners, balanceMicro] = await Promise.all([
-          api.getMatch(market.match_id),
+          market.match_id ? api.getMatch(market.match_id) : Promise.resolve(syntheticMatch),
           api.getBook(marketId),
           api.getFills(marketId),
           api.getOneliners(marketId),
@@ -323,4 +334,12 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
   }, [state.loading, state.errorStatus]);
 
   return { ...state, refreshBalance };
+}
+
+function titleCase(s: string): string {
+  return s
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }

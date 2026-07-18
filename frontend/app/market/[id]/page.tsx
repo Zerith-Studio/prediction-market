@@ -43,10 +43,16 @@ export default function MarketPage({
 
         {!m.loading && !m.errorStatus && m.market && m.match && m.book && (
           <>
-            <MatchHero match={m.match} />
+            {m.market.match_id ? (
+              <>
+                <MatchHero match={m.match} />
 
-            {/* real TxLINE match detail — live stats + team sheets */}
-            <MatchCentre match={m.match} />
+                {/* real TxLINE match detail — live stats + team sheets */}
+                <MatchCentre match={m.match} />
+              </>
+            ) : (
+              <GlobalMarketHero market={m.market} />
+            )}
 
             {/* chart (2/3) + trade panel (1/3), side by side */}
             <section className="rule-t pt-8">
@@ -136,6 +142,67 @@ export default function MarketPage({
       </main>
     </div>
   );
+}
+
+function GlobalMarketHero({
+  market,
+}: {
+  market: {
+    title: string;
+    scope?: string;
+    competition_id?: string;
+    subject_type?: string;
+    subject_id?: string;
+    resolution_source?: string;
+  };
+}) {
+  const subject = market.subject_id ? titleCase(market.subject_id) : "";
+  const scope = market.scope ?? "custom";
+  const source =
+    market.resolution_source === "manual_required"
+      ? "admin-assisted resolution"
+      : market.resolution_source ?? "resolution pending";
+
+  return (
+    <section className="py-7 sm:py-9">
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <div className="eyebrow">World Cup market</div>
+        <div className="min-w-0 truncate font-mono text-[11px] uppercase tracking-[0.14em] text-dim">
+          {scope}
+          {market.competition_id ? ` · competition ${market.competition_id}` : ""}
+        </div>
+      </div>
+
+      <div className="max-w-[820px]">
+        <h2 className="text-[30px] font-bold tracking-tight text-ink sm:text-[44px]">
+          {market.title}
+        </h2>
+        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 font-mono text-[12px] text-muted">
+          {subject && (
+            <span>
+              <span className="text-dim">subject</span> {subject}
+            </span>
+          )}
+          {market.subject_type && (
+            <span>
+              <span className="text-dim">type</span> {market.subject_type}
+            </span>
+          )}
+          <span>
+            <span className="text-dim">source</span> {source}
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function titleCase(s: string): string {
+  return s
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function NotFound({ status }: { status: number }) {

@@ -187,3 +187,129 @@ func TestAdminResolveMarket(t *testing.T) {
 		t.Fatalf("unauthed resolve = %d, want 401", code)
 	}
 }
+
+func TestAdminCreateCustomMarketAndResolveWithEvidence(t *testing.T) {
+	adminW := newWallet(t)
+	s := adminStack(t, adminW.b58)
+	ctx := context.Background()
+	token := adminSignIn(t, s, adminW)
+
+	code, out := adminReq(t, "POST", s.srv.URL+"/admin/markets/custom", token, map[string]any{
+		"scope":             "competition",
+		"template_key":      "golden_boot",
+		"type":              "binary",
+		"title":             "Kylian Mbappe Golden Boot",
+		"rule":              "Settles YES if Mbappe is official World Cup top scorer.",
+		"competition_id":    "72",
+		"subject_type":      "player",
+		"subject_id":        "mbappe",
+		"resolution_source": "manual_required",
+		"rule_json": map[string]any{
+			"kind": "player_leaderboard", "stat": "goals", "tie_policy": "dead_heat",
+		},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("create custom market = %d (%v)", code, out)
+	}
+	marketHex, _ := out["market_id"].(string)
+	if marketHex == "" {
+		t.Fatalf("create response missing market_id: %v", out)
+	}
+	marketID, err := models.ParseHash(marketHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := s.st.GetMarket(ctx, marketID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Scope != "competition" || row.SubjectType != "player" || row.SubjectID != "mbappe" {
+		t.Fatalf("custom metadata: %+v", row)
+	}
+
+	code, out = adminReq(t, "POST", s.srv.URL+"/admin/markets/"+marketHex+"/resolve", token, map[string]any{
+		"outcome": "yes",
+		"evidence": map[string]any{
+			"manual": true, "reason": "official leaderboard checked",
+		},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("resolve custom market = %d (%v)", code, out)
+	}
+	attempts, err := s.st.ResolutionAttempts(ctx, marketID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("resolution attempts = %d, want 1", len(attempts))
+	}
+	if attempts[0].Actor != adminW.b58 || attempts[0].Outcome != "yes" {
+		t.Fatalf("attempt = %+v", attempts[0])
+	}
+}
+
+func TestAdminCreateCustomFixtureMarketMapsFixture(t *testing.T) {
+	adminW := newWallet(t)
+	s := adminStack(t, adminW.b58)
+	ctx := context.Background()
+	token := adminSignIn(t, s, adminW)
+
+	code, out := adminReq(t, "POST", s.srv.URL+"/admin/markets/custom", token, map[string]any{
+		"scope":             "fixture",
+		"fixture_id":        "fixture-custom-api",
+		"home":              "Brazil",
+		"away":              "Croatia",
+		"kickoff":           time.Now().Add(time.Hour).Format(time.RFC3339),
+		"template_key":      "home_corners_over_5_5",
+		"type":              "binary",
+		"title":             "Brazil over 5.5 corners",
+		"rule":              "Settles YES if Brazil record 6+ corners.",
+		"resolution_source": "manual_required",
+		"rule_json": map[string]any{
+			"kind": "fixture_team_stat", "stat": "corners", "team": "home", "operator": ">", "threshold": 5.5,
+		},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("create custom fixture market = %d (%v)", code, out)
+	}
+	marketHex, _ := out["market_id"].(string)
+	marketID, err := models.ParseHash(marketHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := s.st.GetMarket(ctx, marketID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Scope != "fixture" || row.MatchID == "" {
+		t.Fatalf("custom fixture market not mapped to match: %+v", row)
+	}
+	if _, err := s.st.GetMatchByFixture(ctx, "fixture-custom-api"); err != nil {
+		t.Fatalf("fixture not upserted: %v", err)
+	}
+}
+
+func TestAdminMarketDefinitionsExposeWorldCupTemplates(t *testing.T) {
+	adminW := newWallet(t)
+	s := adminStack(t, adminW.b58)
+	token := adminSignIn(t, s, adminW)
+
+	code, out := adminReq(t, "GET", s.srv.URL+"/admin/market-definitions", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("market definitions = %d (%v)", code, out)
+	}
+	raw, ok := out["definitions"].([]any)
+	if !ok || len(raw) == 0 {
+		t.Fatalf("definitions missing: %v", out)
+	}
+	var foundGoldenBoot bool
+	for _, item := range raw {
+		def, _ := item.(map[string]any)
+		if def["key"] == "golden_boot" && def["scope"] == "player" {
+			foundGoldenBoot = true
+		}
+	}
+	if !foundGoldenBoot {
+		t.Fatalf("golden_boot definition not returned: %v", out)
+	}
+}

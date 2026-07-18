@@ -82,7 +82,7 @@ async function safeText(res: Response): Promise<string> {
 interface WireMarket {
   id: string;
   market_id: string;
-  match_id: string;
+  match_id?: string;
   template_key: string;
   type: "binary" | "precision";
   title: string;
@@ -91,13 +91,18 @@ interface WireMarket {
   outcome?: { result?: string; score?: string; actual?: number };
   chain_tx?: string;
   featured_rank?: number | null;
+  scope?: Market["scope"];
+  competition_id?: string;
+  subject_type?: string;
+  subject_id?: string;
+  resolution_source?: string;
 }
 
 function mapMarket(w: WireMarket): Market {
   return {
     id: w.id,
     market_id: w.market_id,
-    match_id: w.match_id,
+    match_id: w.match_id ?? "",
     template_key: w.template_key,
     type: w.type,
     title: w.title,
@@ -113,6 +118,11 @@ function mapMarket(w: WireMarket): Market {
             : null,
     chain_tx: w.chain_tx,
     featured_rank: w.featured_rank ?? null,
+    scope: w.scope,
+    competition_id: w.competition_id,
+    subject_type: w.subject_type,
+    subject_id: w.subject_id,
+    resolution_source: w.resolution_source,
   };
 }
 
