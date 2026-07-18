@@ -181,11 +181,16 @@ func (s *Service) handleEvent(ctx context.Context, fixtureID string, ev feed.Mat
 		}
 	}
 
-	s.hub.Broadcast(ws.Event{
-		Type:      ws.EventMatchState,
-		FixtureID: fixtureID,
-		Data:      map[string]any{"event": ev.Type, "payload": ev.Payload},
-	})
+	// Odds ticks aren't a match-state change — they only feed the MM bot's fair
+	// prices (handled above). Broadcasting them as match_state would push a
+	// payload with no score/stats and make clients blank their last-known state.
+	if ev.Type != feed.EventOdds {
+		s.hub.Broadcast(ws.Event{
+			Type:      ws.EventMatchState,
+			FixtureID: fixtureID,
+			Data:      map[string]any{"event": ev.Type, "payload": ev.Payload},
+		})
+	}
 	return nil
 }
 
