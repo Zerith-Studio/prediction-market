@@ -1,10 +1,10 @@
 ---
 title: "Architecture"
-description: "Two tracks — E1 (Anchor settlement program) and E2 (Go engine + crank + clients) — joined by a frozen interface contract."
+description: "The Anchor settlement program and the Go engine + crank + clients, joined by a frozen interface contract."
 ---
 
-PitchMarket was built by two engineers on two parallel tracks, coding against a frozen
-boundary document, [`docs/interface-contract.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/interface-contract.md).
+PitchMarket is split into two components that meet at a frozen boundary document,
+[`docs/interface-contract.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/interface-contract.md).
 Everything below is a map of that split.
 
 ## System overview
@@ -15,7 +15,7 @@ flowchart LR
     FE[Next.js frontend]
     MOB[Expo mobile app]
   end
-  subgraph E2 ["E2 — Go backend"]
+  subgraph BE ["Go backend"]
     API[REST + WS API]
     EX[exchange core]
     ME[matching engine]
@@ -24,7 +24,7 @@ flowchart LR
     BOT[MM bot]
     FEED[TxLINE feed]
   end
-  subgraph E1 ["E1 — Solana devnet"]
+  subgraph CHAIN ["Solana devnet"]
     PROG[pitchmarket Anchor program]
   end
   FE -->|signed orders| API
@@ -38,7 +38,7 @@ flowchart LR
   FEED --> EX
 ```
 
-## E1 — the Anchor settlement program (`programs/pitchmarket/`)
+## The Anchor settlement program (`programs/pitchmarket/`)
 
 A greenfield Anchor program (no fork) that owns all money movement:
 
@@ -52,7 +52,7 @@ A greenfield Anchor program (no fork) that owns all money movement:
 Deployed on devnet at `3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs` — see
 [On-chain program](/onchain/program) for the accounts and instruction surface.
 
-## E2 — the Go backend (`backend/`)
+## The Go backend (`backend/`)
 
 - **`matching`** — a unified price-time-priority ladder that pairs NORMAL, MINT, and
   MERGE fills (see [Matching engine](/concepts/matching)).

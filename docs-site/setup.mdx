@@ -7,8 +7,8 @@ Everything here is condensed from the repo's `CLAUDE.md` and `progress.md` §4 (
 toolchain post-mortem). The repo layout:
 
 ```
-programs/pitchmarket/   E1 — Anchor settlement program (Rust)
-backend/                E2 — Go matching engine, crank, feed, API
+programs/pitchmarket/   Anchor settlement program (Rust)
+backend/                Go matching engine, crank, feed, API
 frontend/               Next.js web app
 mobile/                 Expo (React Native) app
 docs/                   ADRs, interface contract, specs, handoff
@@ -82,12 +82,12 @@ scanned via `int64`.
 
 ```sh
 # Off-chain mirror mode — no chain needed
-cd backend && DEMO_FIXTURE=demo-final go run ./cmd/server
+cd backend && go run ./cmd/server
 
 # On-chain mode — against the deployed devnet program
 SOLANA_RPC_URL=... OPERATOR_KEYPAIR=... go run ./cmd/server
 
-# Reproduce the full devnet floor proof (all balance assertions)
+# Run the full devnet lifecycle with balance assertions
 go run ./cmd/devnet-e2e
 ```
 
@@ -97,7 +97,7 @@ for the complete runbooks.
 
 <Note>
 The program keypair (`target/deploy/pitchmarket-keypair.json`) is committed for this
-devnet-only hackathon deployment (decision closed 2026-07-12). Public devnet RPC
+devnet-only deployment. Public devnet RPC
 rate-limits aggressive status polls — the crank and harness poll gently (1.5–2.5&nbsp;s);
 a transaction that "times out" usually landed (check `solana confirm`).
 </Note>

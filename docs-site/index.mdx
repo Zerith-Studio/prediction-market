@@ -3,12 +3,11 @@ title: "PitchMarket"
 description: "A football prediction exchange on Solana — off-chain matching, on-chain non-custodial settlement."
 ---
 
-PitchMarket is a football prediction exchange built for the Superteam × TxODDS hackathon
-("Prediction Markets & Settlement" track). Users trade binary outcome markets on live
-World Cup fixtures priced from the TxLINE data feed. Matching is off-chain for speed;
-money moves on-chain, non-custodially, per cryptographically signed orders.
+PitchMarket is a football prediction exchange on Solana. Users trade binary outcome
+markets on live football fixtures priced from the TxLINE data feed. Matching is off-chain
+for speed; money moves on-chain, non-custodially, per cryptographically signed orders.
 
-## The one-paragraph pitch
+## The core guarantee
 
 Your funds are safe during trading because the settlement contract moves them only per an
 order **you** signed, at a price at least as good as your limit. The operator matches
@@ -41,22 +40,17 @@ and redemption are on-chain on Solana devnet.
 | **Combos (RFQ)** | Parlays: taker holds "all N legs win", an MM quotes the other side | Off-chain in the current build, behind an interface seam; the on-chain `combo_accept`/`resolve_combo` path is designed (ADR 0004) but stubbed |
 | **Precision pools** | Guess a match stat exactly; pool-based, winners paid by losers, σ-normalized closeness score | Off-chain (Tier 2 by design, ADR 0006) |
 
-## Current status
+## Deployment
 
-The trustless floor is **done and proven on devnet**: the program is deployed at the
-pinned ID `3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs`, and a full lifecycle — signed
-order → engine match → Go crank `settle_match` (v0 transaction + address lookup table) →
-`resolve_market` → 1:1 `redeem` — has run green with balance assertions
-(`go run ./cmd/devnet-e2e`).
-
-Live status, verified-vs-unverified breakdown, and the changelog live in
-[`progress.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/progress.md)
-at the repo root — that file is the single source of truth for "what actually works
-today". See also [Status & verification](/reference/status).
+The core settlement path is implemented and deployed on Solana devnet at program ID
+`3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs`. The full binary lifecycle — signed
+order → engine match → crank `settle_match` (v0 transaction + address lookup table) →
+`resolve_market` → 1:1 `redeem` — executes end to end with balance assertions. See
+[Implementation status](/reference/status) for the per-component breakdown.
 
 <Note>
-Everything in this site is derived from the repo's pinned documents:
-`docs/interface-contract.md` (the frozen E1↔E2 boundary), `docs/adr/0001–0007`,
-`docs/HANDOFF.md`, `PROJECT_PLAN.md`, and `progress.md`. Where those documents mark
-something unverified or unimplemented, this site says so rather than papering over it.
+Everything in this site is derived from the repo's pinned technical documents:
+`docs/interface-contract.md` (the frozen program ↔ backend boundary), `docs/adr/0001–0007`,
+and the specs under `docs/`. Where those documents mark something unimplemented or
+stubbed, this site says so rather than papering over it.
 </Note>

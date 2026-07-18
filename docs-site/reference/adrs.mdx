@@ -15,7 +15,7 @@ are the authoritative text; this page is a reading guide.
 | [0004](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/adr/0004-combo-settlement-onchain-reads-leg-conditions.md) | RFQ combo settlement | A parlay = a binary complete set over `C = AND(legs)`. Off-chain negotiation, on-chain escrow + a resolve that reads the same leg-condition accounts binary redeem reads → no new oracle. |
 | [0005](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/adr/0005-settlement-oracle-layer.md) | Oracle / root-of-trust | Floor = (a) single key; swing = (d) TxODDS-signed data verified on-chain (operator becomes a pure relay); fallback = (b) challenge window. Finality = signed `final=true` + T+X delay; `VOID` for abandonment. |
 | [0006](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/adr/0006-precision-market-economics.md) | Precision economics | Kickoff lock + one entry per wallet + rake + σ-normalized score + a crowd-seeding (not strategic) bot. The formula's convexity already charges carpet-bettors ~5×. |
-| [0007](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/adr/0007-scope-team-schedule.md) | Scope / team / schedule | 2 engineers, greenfield Anchor, two parallel tracks joined by the frozen interface contract; hard cut order; the binary trust-core is the never-cut hill. |
+| [0007](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/adr/0007-scope-team-schedule.md) | Architecture boundary | Greenfield Anchor program (no fork); the settlement program and backend meet at the frozen interface contract; the fully-on-chain binary trust-core is the architectural priority the rest is layered around. |
 
 ## The trust story in one paragraph
 
@@ -27,13 +27,12 @@ outcomes binary redemption reads, adding zero new oracle (0004). All of it botto
 on one question — how a TxLINE datapoint becomes a trusted on-chain outcome — answered
 best by making TxODDS the cryptographic root of settlement trust via signed data
 verified on-chain (0005). Precision markets are pool-based and economically bounded
-(0006). Two engineers built it on two parallel tracks with a hard mid-point cut line
-(0007).
+(0006). The settlement program is greenfield Anchor, and the fully-on-chain binary
+trust-core is the architectural priority the rest of the system is layered around (0007).
 
 ## Companions
 
-- [`docs/interface-contract.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/interface-contract.md) — the frozen E1↔E2 build boundary.
+- [`docs/interface-contract.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/interface-contract.md) — the frozen program ↔ backend build boundary.
 - [`docs/core-features-spec.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/core-features-spec.md) — Polymarket-verified feature parity.
 - [`docs/glossary.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/glossary.md) — domain vocabulary.
-- [`docs/HANDOFF.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/HANDOFF.md) — runbooks, invariants, punch list.
-- [`PROJECT_PLAN.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/PROJECT_PLAN.md) — the execution plan and schedule.
+- [`docs/HANDOFF.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/HANDOFF.md) — runbooks and invariants.

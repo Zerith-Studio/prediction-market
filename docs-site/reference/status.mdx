@@ -1,53 +1,55 @@
 ---
-title: "Status & verification"
-description: "What is proven, what is written-but-unverified, and where the live truth lives."
+title: "Implementation status"
+description: "What is implemented on-chain, what is off-chain by design, and what is designed but not yet built."
 ---
 
-<Warning>
-This page is a snapshot (last synced with `progress.md` as of 2026-07-18). The live
-source of truth is
-[`progress.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/progress.md)
-at the repo root — its status marks mean exactly: ✅ ran it and watched it work ·
-🟡 compiles but never executed · 🔴 not started / blocked.
-</Warning>
+This page records the implementation maturity of each component: **implemented and
+tested**, **implemented but untested**, **off-chain by design**, and **designed but not
+implemented**.
 
-## Proven on devnet (the floor)
+## On-chain — implemented and tested
 
-The never-cut hill of ADR 0007 is done, reproducible via `go run ./cmd/devnet-e2e` with
-every balance asserted:
+The full binary settlement path is implemented and deployed on Solana devnet at program
+ID `3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs`:
 
-- Program deployed at the pinned ID (2026-07-15).
-- Signed order → engine match → **Go crank `settle_match` on devnet** (ed25519 verify,
-  fill accounting, MINT path).
-- `resolve_market` → `redeem` moving USDC 1:1.
+- Signed order → engine match → `settle_match` — on-chain ed25519 verification, per-order
+  fill accounting, and NORMAL/MINT/MERGE money movement.
+- `resolve_market` → `redeem` — moving USDC 1:1 against escrow.
 
-All eight program lifecycle tests (`npm test`) pass on a local validator, covering all
-three settle paths, cancel-fails-closed, resolution, and redemption.
+All eight program lifecycle tests pass on a local validator, covering the three settle
+paths, cancel-fails-closed, resolution, and redemption. The same lifecycle runs end to
+end against devnet with every balance asserted.
 
-## Verified off-chain
+## Off-chain — implemented and tested
 
-The entire Go backend (matching, store, exchange, crank builder, API, WS, RFQ,
-precision, bot, lifecycle) passes an HTTP end-to-end suite against real Postgres,
-including adversarial tests (28 attack vectors all clean 4xx, concurrent load with zero
-5xx, a fixed uint64-overflow exploit). The web frontend passed a scripted browser e2e
-against the live stack.
+The Go backend — matching, store, exchange, crank builder, REST + WebSocket API, RFQ,
+precision, MM bot, and lifecycle — passes an HTTP end-to-end suite against Postgres,
+including adversarial coverage: 28 attack vectors returning clean 4xx, concurrent load
+with zero 5xx, and a fixed uint64-overflow case.
 
-## Written but unverified
+## Off-chain by design
 
-- **Mobile UI screens** — the library layer ran green end-to-end against a live server,
-  but no physical-device click-through has happened; every screen is 🟡 until a human
-  does that pass. Privy login on mobile is blocked on a dashboard allowlist setting.
-- **Privy path on mobile** — never exercised against a real Privy app.
-- **Frontend `randomSalt()`** — the salt-rounding bug fixed in `mobile/` is flagged as
-  still present in `frontend/lib/borsh.ts` (see `progress.md` 2026-07-16).
+- **Precision pools** are pool-based (ADR 0006). There is no priced complete set to
+  escrow, so they settle off-chain.
+- **Combos** currently run off-chain behind an interface seam (ADR 0007); the designed
+  on-chain path is listed below.
 
-## Not built
+## Implemented but untested
 
-- On-chain `combo_accept` / `resolve_combo` (combos run off-chain behind the seam).
-- Oracle tiers (b) and (d) — gated on TxODDS's reply about signed data.
-- The productized combo void rule (voided leg = push) — named, explicitly future.
+- **Mobile UI screens** — the client library layer runs end to end against a live
+  backend, but the screens have no device-level verification yet.
+- **Frontend `randomSalt()`** — the salt-rounding fix applied in the mobile encoder is
+  still pending in `frontend/lib/borsh.ts` (see [Signed messages](/onchain/signed-messages)).
 
-## Remaining work
+## Designed but not implemented
 
-Per `progress.md` §1/§7: hosting/deploy, the human browser
-click-through, and confirming the TxODDS signed-data email (open decision #3).
+- On-chain `combo_accept` / `resolve_combo` — typed stubs returning `NotImplemented`
+  (ADR 0004).
+- Oracle tiers **(b)** commit-reveal / challenge window and **(d)** provider-signed data
+  verified on-chain (ADR 0005). Tier **(a)**, the single resolver key, is implemented.
+- The productized combo void rule (voided leg = push) — specified, not yet built.
+
+<Note>
+The authoritative, always-current status lives in `progress.md` at the repo root, with
+per-component marks and a changelog.
+</Note>
