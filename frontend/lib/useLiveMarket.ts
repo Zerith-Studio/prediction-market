@@ -270,6 +270,20 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
               return { ...s, match: { ...s.match, lineups: (d.payload as Lineups) ?? s.match.lineups } };
             }
             const finished = d.event === "full_time";
+            // Merge onto the last-known live_state so a sparse or partial tick
+            // (e.g. an early kickoff frame, or a stray odds re-broadcast) can
+            // never wipe the score or stats: keep the last good value for any
+            // field this update omits. prevLs is the already-mapped shape.
+            const prevLs = s.match.live_state;
+            const incoming = (d.payload ?? {}) as ScoreTick;
+            const mergedLs: ScoreTick = {
+              minute: incoming.minute ?? prevLs.minute,
+              period: incoming.period ?? prevLs.period,
+              home_goals: incoming.home_goals ?? prevLs.home_score,
+              away_goals: incoming.away_goals ?? prevLs.away_score,
+              possession: incoming.possession ?? prevLs.possession,
+              stats: incoming.stats ?? prevLs.stats,
+            };
             return {
               ...s,
               match: mapMatch({
@@ -279,7 +293,7 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
                 away: s.match.away,
                 kickoff_at: s.match.kickoff_at,
                 status: finished ? "finished" : "live",
-                live_state: (d.payload ?? {}) as ScoreTick,
+                live_state: mergedLs,
                 lineups: s.match.lineups, // carry sheets across score ticks
               }),
             };
