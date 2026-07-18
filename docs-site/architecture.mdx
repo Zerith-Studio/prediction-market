@@ -74,7 +74,7 @@ Deployed on devnet at `3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs` — see
 
 - **`frontend/`** — Next.js app: markets index, market page with live ladder, combos
   builder, precision pools, portfolio with realized/unrealized PnL. Wallets via Privy
-  embedded wallets (with a localStorage ed25519 demo-wallet fallback). Orders are
+  embedded wallets (with a localStorage ed25519 fallback wallet). Orders are
   borsh-encoded and signed client-side; the TypeScript encoder is pinned to the same
   golden vector as the Rust and Go encoders and checked at build time.
 - **`mobile/`** — Expo (React Native) app covering the core loop: markets, trade,

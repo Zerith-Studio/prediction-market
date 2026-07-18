@@ -17,7 +17,7 @@ struct Order {
   side:       u8,       // 0 = BUY (provide USDC), 1 = SELL (provide tokens)
   price:      u16,      // 1..99  (¢, implied P of `outcome`)
   size:       u64,      // shares
-  fee_bps:    u16,      // 0 for the demo
+  fee_bps:    u16,      // 0 in the current build
   expiry:     i64,      // unix; 0 = GTC
   salt:       u64,      // per-order uniqueness / replay marker (NOT a sequential nonce)
 }

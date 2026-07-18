@@ -33,6 +33,20 @@
       }
     ]
   },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "type": "github",
+        "href": "https://github.com/Zerith-Studio"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Get started",
+      "href": "/setup"
+    }
+  },
   "footer": {
     "socials": {
       "github": "https://github.com/Zerith-Studio"
