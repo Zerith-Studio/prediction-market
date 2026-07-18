@@ -160,6 +160,10 @@ func run(log *slog.Logger) error {
 	lc := lifecycle.New(st, hub, rfqSvc, chainResolver(chainOps), priceSink, log)
 	if chainOps != nil {
 		lc.Creator = chainOps
+		// Backfill/self-heal on-chain market init: a market created before on-chain
+		// init existed (early global/admin markets) or whose init failed reverts at
+		// settle. InitializeMarket is idempotent + cheap, so ensure them here.
+		go reconcileMarketInit(ctx, st, chainOps, log)
 	}
 
 	// --- one-liners (Gemini preferred when configured, else Claude)
@@ -335,6 +339,52 @@ func discoverFixtures(ctx context.Context, provider *txodds.Provider, lc *lifecy
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+		}
+	}
+}
+
+// reconcileMarketInit ensures every open binary market is initialized on-chain.
+// InitializeMarket is idempotent and cheap (a GetAccountInfo, then a tx only if
+// the market PDA is missing), so this backfills markets created before on-chain
+// init existed — e.g. early global/admin markets like Golden Boot — and self-heals
+// any init that failed. Without it, trading such a market matches off-chain but
+// every settle_match reverts (no outcome mints on-chain). Startup + slow ticker.
+func reconcileMarketInit(ctx context.Context, st *store.Store, chain *crank.ChainOps, log *slog.Logger) {
+	const interval = 10 * time.Minute
+	run := func() {
+		markets, err := st.ListMarkets(ctx, "open")
+		if err != nil {
+			log.Warn("market-init: list open markets", "err", err)
+			return
+		}
+		backfilled := 0
+		for _, m := range markets {
+			if m.Type != "binary" {
+				continue
+			}
+			sig, err := chain.InitializeMarket(ctx, m.MarketID)
+			if err != nil {
+				log.Error("market-init: initialize failed", "title", m.Title, "err", err)
+				continue
+			}
+			if sig != "" {
+				backfilled++
+				log.Info("market-init: initialized on-chain", "title", m.Title, "tx", sig)
+			}
+		}
+		if backfilled > 0 {
+			log.Info("market-init: backfilled un-initialized markets", "count", backfilled)
+		}
+	}
+	run() // startup backfill
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			run()
 		}
 	}
 }
