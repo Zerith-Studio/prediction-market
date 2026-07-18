@@ -10,10 +10,12 @@ import bs58 from "bs58";
 import { usePitchWallet } from "@/lib/wallet";
 import { api, explorerTx } from "@/lib/api";
 import { borshOrder, fromHex, randomSalt, toHex } from "@/lib/borsh";
-import type { Portfolio, Position } from "@/lib/types";
+import type { Portfolio, Position, Market } from "@/lib/types";
 import { usd, shares as fmtShares, shortHash } from "@/lib/format";
 import { TopBar } from "@/components/TopBar";
 import { VerifyLink } from "@/components/VerifyLink";
+import { useWatchlist } from "@/lib/watchlist";
+import { kindOf } from "@/lib/kinds";
 
 interface PosCalc {
   p: Position;
@@ -39,6 +41,12 @@ export default function PortfolioPage() {
   const [pf, setPf] = useState<Portfolio | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // market_id or order_hash in flight
   const [error, setError] = useState<string | null>(null);
+  const { isWatched } = useWatchlist();
+  const [markets, setMarkets] = useState<Market[]>([]);
+  useEffect(() => {
+    api.listMarkets().then(setMarkets).catch(() => {});
+  }, []);
+  const watched = markets.filter((m) => isWatched(m.market_id));
 
   const load = useCallback(() => {
     api
@@ -180,6 +188,31 @@ export default function PortfolioPage() {
                 </div>
               </div>
             </section>
+
+            {watched.length > 0 && (
+              <section className="rule-b py-6">
+                <h2 className="eyebrow mb-4">Watchlist</h2>
+                <div className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-1">
+                  {watched.map((m) => (
+                    <Link
+                      key={m.market_id}
+                      href={m.type === "precision" ? `/precision/${m.market_id}` : `/market/${m.market_id}`}
+                      className="group flex min-h-[76px] w-[220px] shrink-0 snap-start flex-col justify-between rounded-[3px] border border-line bg-line/40 p-3.5 transition-[transform,border-color,background-color] duration-150 ease-out-strong hover:-translate-y-px hover:border-line2 hover:bg-line/70"
+                    >
+                      <span className="line-clamp-2 text-[13px] leading-snug text-ink transition-colors group-hover:text-accent">
+                        {m.title}
+                      </span>
+                      <span className="mt-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+                        <span className="truncate">{kindOf(m)}</span>
+                        <span className={m.status === "settled" ? "text-accent/70" : ""}>
+                          {m.status !== "open" ? m.status : ""}
+                        </span>
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {error && (
               <p className="mb-4 font-mono text-[12px] text-down" role="alert">
