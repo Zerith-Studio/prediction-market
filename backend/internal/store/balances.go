@@ -82,7 +82,7 @@ func (s *Store) GetPositions(ctx context.Context, wallet string) ([]Position, er
 // UpsertUser registers a Privy login → wallet binding.
 func (s *Store) UpsertUser(ctx context.Context, privyID, wallet string) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO users (privy_id, wallet) VALUES ($1, $2)
+		INSERT INTO users (privy_id, wallet, avatar_seed) VALUES ($1, $2, $2)
 		ON CONFLICT (privy_id) DO NOTHING`, privyID, wallet)
 	return err
 }

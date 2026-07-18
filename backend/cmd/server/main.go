@@ -45,6 +45,7 @@ import (
 	"github.com/gagliardetto/solana-go/rpc"
 
 	"github.com/Zerith-Studio/prediction-market/backend/internal/api"
+	"github.com/Zerith-Studio/prediction-market/backend/internal/breakingnews"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/crank"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/exchange"
 	"github.com/Zerith-Studio/prediction-market/backend/internal/feed"
@@ -174,8 +175,10 @@ func run(log *slog.Logger) error {
 		go oneliner.New(st, hub, gen, log).Run(ctx)
 	}
 
-	// --- chain index (mirror reconciliation)
-	if rpcURL != "" {
+	// --- chain index (mirror reconciliation). INDEX_POLL=off skips it entirely
+	// (e.g. on an RPC plan without getProgramAccounts); the poller also
+	// self-disables if the provider rejects the method.
+	if rpcURL != "" && os.Getenv("INDEX_POLL") != "off" {
 		poller := index.NewRPCPoller(rpcURL, programID, log)
 		proc := index.NewProcessor(st, log)
 		go func() {
@@ -190,6 +193,7 @@ func run(log *slog.Logger) error {
 	// odds snapshot) to the admin panel. It stays a nil interface in replay /
 	// off-chain mode, which disables the admin fixture browser.
 	var fixtureSrc api.FixtureSource
+	var oddsSrc breakingnews.OddsSource // real implied Yes% for breaking-news rows (txodds only)
 	switch feedMode(operator) {
 	case "txodds":
 		provider, err := txodds.New(
@@ -201,6 +205,7 @@ func run(log *slog.Logger) error {
 			return errors.New("txodds provider: " + err.Error())
 		}
 		fixtureSrc = provider
+		oddsSrc = provider
 		comp, _ := strconv.Atoi(envOr("TXODDS_COMPETITION", "72"))
 		go discoverFixtures(ctx, provider, lc, bot, comp, log)
 		go reconcileResolutions(ctx, st, lc, provider, log)
@@ -212,6 +217,18 @@ func run(log *slog.Logger) error {
 			go runReplayFixture(ctx, lc, bot, provider, fixture, log)
 			log.Info("feed: replay", "fixture", fixture)
 		}
+	}
+
+	// --- breaking news (hourly, Exa-grounded). Optional: no EXA_API_KEY, no
+	// ticker. Gemini (when set) condenses the real article; odds (txodds only)
+	// supply the Yes% + momentum delta.
+	if key := os.Getenv("EXA_API_KEY"); key != "" {
+		var sum breakingnews.Summarizer
+		if gk := os.Getenv("GEMINI_API_KEY"); gk != "" {
+			sum = breakingnews.NewGeminiSummarizer(gk, os.Getenv("GEMINI_MODEL"))
+		}
+		go breakingnews.New(st, breakingnews.NewExa(key), oddsSrc, sum, log).Run(ctx)
+		log.Info("breakingnews: hourly ticker running", "odds", oddsSrc != nil, "gemini", sum != nil)
 	}
 
 	// Admin panel: gated by an operator-wallet signature. ADMIN_PUBKEY names the

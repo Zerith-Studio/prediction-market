@@ -4,16 +4,19 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, configured } from "@/lib/api";
 import { kindOf } from "@/lib/kinds";
-import type { Market, Match } from "@/lib/types";
+import type { Market, Match, NewsItem } from "@/lib/types";
 import { TopBar } from "@/components/TopBar";
 import { FlagPair } from "@/components/TeamFlag";
 import { StarButton } from "@/components/StarButton";
+import { FeaturedHero } from "@/components/FeaturedHero";
+import { BreakingNews } from "@/components/BreakingNews";
 import { usePitchWallet } from "@/lib/wallet";
 
 export default function MarketsIndex() {
   const wallet = usePitchWallet();
   const [matches, setMatches] = useState<Match[]>([]);
   const [markets, setMarkets] = useState<Market[]>([]);
+  const [news, setNews] = useState<NewsItem[]>([]);
   const [balance, setBalance] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -25,6 +28,8 @@ export default function MarketsIndex() {
       return;
     }
     let alive = true;
+    // Breaking news is best-effort — never block the index if it fails/empty.
+    api.getBreakingNews().then((n) => alive && setNews(n)).catch(() => {});
     Promise.all([api.listMatches(), api.listMarkets(), api.getBalance(wallet.address)])
       .then(([ms, mks, bal]) => {
         if (!alive) return;
@@ -43,11 +48,16 @@ export default function MarketsIndex() {
     };
   }, [wallet.address]);
 
+  // Pinned markets (admin featured_rank), lowest rank first, drive the hero.
+  const featured = markets
+    .filter((m) => m.featured_rank != null && m.status !== "void")
+    .sort((a, b) => (a.featured_rank ?? 0) - (b.featured_rank ?? 0));
+
   return (
     <div className="min-h-screen">
       <TopBar balanceMicro={balance} />
       <main className="mx-auto max-w-[1200px] px-5 sm:px-8">
-        <div className="flex items-baseline justify-between py-8">
+        <div className="flex flex-col gap-1 py-8 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
           <h1 className="text-[15px] font-semibold">Matches</h1>
           <span className="eyebrow">TxLINE live data · settled on Solana devnet</span>
         </div>
@@ -66,6 +76,24 @@ export default function MarketsIndex() {
               Markets appear automatically when TxLINE lists a World Cup fixture.
             </span>
           </p>
+        )}
+
+        {/* Featured hero + Breaking News, side by side (reference layout). */}
+        {!loading && !error && featured.length > 0 && (
+          <div className={news.length ? "grid gap-8 lg:grid-cols-[1fr_320px]" : ""}>
+            <FeaturedHero featured={featured} news={news} />
+            {news.length > 0 && (
+              <div className="lg:rule-l lg:self-start lg:pl-8 lg:sticky lg:top-[76px]">
+                <BreakingNews items={news} />
+              </div>
+            )}
+          </div>
+        )}
+        {/* No pinned market yet, but there is fresh news — show it full width. */}
+        {!loading && !error && featured.length === 0 && news.length > 0 && (
+          <div className="rule-t py-6">
+            <BreakingNews items={news} />
+          </div>
         )}
 
         {matches.map((match) => (
@@ -129,8 +157,8 @@ function MatchSection({ match, markets }: { match: Match; markets: Market[] }) {
                 {m.title}
               </span>
             </span>
-            <div className="mt-3 flex items-center justify-between">
-              <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
                 {kindOf(m)}
               </span>
               <span className="flex items-center gap-2">
@@ -197,8 +225,8 @@ function BinaryCard({ m, match }: { m: Market; match: Match }) {
           {m.title}
         </span>
       </span>
-      <div className="mt-3 flex items-center justify-between">
-        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
           {kindOf(m)}
         </span>
         <span className="flex items-center gap-2">

@@ -1,10 +1,12 @@
 import type {
   Book,
   BookLevel,
+  Comment,
   Fill,
   Lineups,
   Market,
   Match,
+  NewsItem,
   Portfolio,
   Settlement,
   Side,
@@ -88,6 +90,7 @@ interface WireMarket {
   status: Market["status"];
   outcome?: { result?: string; score?: string; actual?: number };
   chain_tx?: string;
+  featured_rank?: number | null;
 }
 
 function mapMarket(w: WireMarket): Market {
@@ -109,6 +112,7 @@ function mapMarket(w: WireMarket): Market {
             ? { value: w.outcome.actual }
             : null,
     chain_tx: w.chain_tx,
+    featured_rank: w.featured_rank ?? null,
   };
 }
 
@@ -253,6 +257,37 @@ export const api = {
     return get<Match[], { matches: WireMatch[] | null }>(`/matches`, (w) =>
       (w.matches ?? []).map(mapMatch)
     );
+  },
+
+  // Latest hourly Breaking News (real Exa articles + real Yes%/delta). The wire
+  // shape already matches NewsItem; degrade to [] when the panel is empty.
+  async getBreakingNews(): Promise<NewsItem[]> {
+    return get<NewsItem[], { items: NewsItem[] | null }>(`/news`, (w) => w.items ?? []);
+  },
+
+  // Per-market comments (unsigned — wallet is a claim). Pass the viewer wallet
+  // to get per-comment `liked` flags.
+  async getComments(marketId: string, wallet: string | null): Promise<Comment[]> {
+    const q = wallet ? `?wallet=${encodeURIComponent(wallet)}` : "";
+    return get<Comment[], { comments: Comment[] | null }>(
+      `/markets/${marketId}/comments${q}`,
+      (w) => w.comments ?? []
+    );
+  },
+  async postComment(
+    marketId: string,
+    body: { wallet: string; body: string; parent_id?: string }
+  ): Promise<Comment> {
+    return post<Comment>(`/markets/${marketId}/comments`, body);
+  },
+  async likeComment(commentId: string, wallet: string): Promise<{ liked: boolean; like_count: number }> {
+    return post<{ liked: boolean; like_count: number }>(`/comments/${commentId}/like`, { wallet });
+  },
+  async editComment(commentId: string, wallet: string, body: string): Promise<{ id: string; body: string }> {
+    return post<{ id: string; body: string }>(`/comments/${commentId}/edit`, { wallet, body });
+  },
+  async deleteComment(commentId: string, wallet: string): Promise<{ deleted: string }> {
+    return post<{ deleted: string }>(`/comments/${commentId}/delete`, { wallet });
   },
 
   async listMarkets(status = ""): Promise<Market[]> {
