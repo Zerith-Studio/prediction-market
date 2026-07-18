@@ -122,7 +122,7 @@ func (b *Bot) Requote(ctx context.Context, marketID [32]byte, fair uint16) error
 			Salt:   b.rng.Uint64(),
 		}
 		models.SignOrder(o, b.priv)
-		hash, _, err := b.ex.SubmitOrder(ctx, o)
+		hash, _, _, err := b.ex.SubmitOrder(ctx, o)
 		if err != nil {
 			return fmt.Errorf("mmbot: post quote: %w", err)
 		}

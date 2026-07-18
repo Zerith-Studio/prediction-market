@@ -9,6 +9,7 @@ import { buyCostMicro, maxPayoutMicro, usd } from "@/lib/format";
 import { api, ApiError } from "@/lib/api";
 import { borshOrder, fromHex, randomSalt, toHex } from "@/lib/borsh";
 import { usePitchWallet } from "@/lib/wallet";
+import { notify } from "@/lib/toast";
 
 type SubmitState = "idle" | "signing" | "placed";
 
@@ -109,6 +110,7 @@ export function TradePanel({
         sig: toHex(sig),
       });
       setPlacedLabel(res.fills.length ? "Filled" : "Resting on book");
+      notify.order(res, { side, outcome, size: n, price: p });
       setSubmit("placed");
       onPlaced?.();
       window.setTimeout(() => setSubmit("idle"), 2600);
@@ -135,6 +137,7 @@ export function TradePanel({
         await api.depositMirror(wallet.address, amount);
       }
       setServerError(null);
+      notify.deposited(amount);
       onPlaced?.();
     } catch (e) {
       setServerError(e instanceof Error ? e.message : "Deposit failed.");

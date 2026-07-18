@@ -104,23 +104,28 @@ func validate(o *models.Order, now time.Time) error {
 // Submit validates and adds an order to the book, greedily matching it against
 // both crossing populations, and returns any fills produced. The unfilled
 // remainder rests (GTC / GTD per Expiry).
-func (b *Book) Submit(o *models.Order) ([]Fill, error) {
+//
+// The second return value is the hashes of the taker's OWN resting orders that
+// were cancelled by self-trade prevention (cancel-resting policy — see cross):
+// the taker never fills against itself, and the exchange releases those orders'
+// soft-locks. It is nil for the common no-self-cross case.
+func (b *Book) Submit(o *models.Order) ([]Fill, [][32]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	now := b.now()
 	if err := validate(o, now); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	hash := models.OrderHash(o)
 	if _, dup := b.byHash[hash]; dup {
-		return nil, ErrDuplicate
+		return nil, nil, ErrDuplicate
 	}
 
 	taker := &RestingOrder{Order: o, Hash: hash, Remaining: o.Size, Seq: b.nextSeq}
 	b.nextSeq++
 
-	fills := b.cross(taker, now)
+	fills, stpCancelled := b.cross(taker, now)
 
 	b.byHash[hash] = taker
 	if taker.Remaining > 0 {
@@ -130,7 +135,7 @@ func (b *Book) Submit(o *models.Order) ([]Fill, error) {
 			heap.Push(b.asks[o.Outcome], taker)
 		}
 	}
-	return fills, nil
+	return fills, stpCancelled, nil
 }
 
 // LoadResting inserts an order into the book WITHOUT matching — used to rebuild
@@ -197,7 +202,7 @@ type candidate struct {
 	effective func(makerPrice uint16) uint16
 }
 
-func (b *Book) cross(taker *RestingOrder, now time.Time) []Fill {
+func (b *Book) cross(taker *RestingOrder, now time.Time) ([]Fill, [][32]byte) {
 	o := taker.Order
 	var cands [2]candidate
 	takerBuys := o.Side == models.SideBuy
@@ -214,6 +219,7 @@ func (b *Book) cross(taker *RestingOrder, now time.Time) []Fill {
 	}
 
 	var fills []Fill
+	var stpCancelled [][32]byte
 	for taker.Remaining > 0 {
 		best := -1
 		var bestEff uint16
@@ -239,6 +245,17 @@ func (b *Book) cross(taker *RestingOrder, now time.Time) []Fill {
 			break
 		}
 
+		// Self-trade prevention (cancel-resting): never execute a taker against
+		// its OWN resting order — that would be a wash trade that paints the tape
+		// while money just moves wallet→same wallet. Cancel the resting order (it
+		// leaves the book) and keep matching the taker against everyone else. The
+		// exchange releases the cancelled order's soft-lock, same as a user cancel.
+		if bestMaker.Order.Maker == o.Maker {
+			bestMaker.cancelled = true
+			stpCancelled = append(stpCancelled, bestMaker.Hash)
+			continue
+		}
+
 		size := min(taker.Remaining, bestMaker.Remaining)
 		price := bestMaker.Order.Price // NORMAL: maker sets the price
 		if cands[best].matchType != models.MatchNormal {
@@ -258,7 +275,7 @@ func (b *Book) cross(taker *RestingOrder, now time.Time) []Fill {
 			heap.Pop(cands[best].h)
 		}
 	}
-	return fills
+	return fills, stpCancelled
 }
 
 // peekLive returns the best live resting order on h, lazily popping cancelled

@@ -52,7 +52,7 @@ func TestConcurrentHTTPLoad(t *testing.T) {
 	// Deep resting SELL liquidity: 1000 YES @55 from one seller.
 	seller := newWallet(t)
 	s.st.GrantTokens(ctx, seller.b58, market, 1000, 0)
-	if _, _, err := s.ex.SubmitOrder(ctx, signedModelOrder(seller, market, models.OutcomeYes, models.SideSell, 55, 1000, 1)); err != nil {
+	if _, _, _, err := s.ex.SubmitOrder(ctx, signedModelOrder(seller, market, models.OutcomeYes, models.SideSell, 55, 1000, 1)); err != nil {
 		t.Fatal(err)
 	}
 

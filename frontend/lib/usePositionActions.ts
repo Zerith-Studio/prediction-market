@@ -9,6 +9,7 @@ import { useCallback, useState } from "react";
 import bs58 from "bs58";
 import { api } from "./api";
 import { borshOrder, fromHex, randomSalt, toHex } from "./borsh";
+import { notify } from "./toast";
 import type { Position } from "./types";
 import { usePitchWallet } from "./wallet";
 
@@ -57,7 +58,7 @@ export function usePositionActions(onDone: () => void) {
           salt,
         });
         const sig = await wallet.signMessage(msg);
-        await api.postOrder({
+        const res = await api.postOrder({
           maker: wallet.address,
           market_id: x.p.market_id,
           outcome,
@@ -69,8 +70,10 @@ export function usePositionActions(onDone: () => void) {
           salt: Number(salt),
           sig: toHex(sig),
         });
+        notify.exit(res, { outcome, size: x.qty, price });
         onDone();
       } catch (e) {
+        notify.error(e, "Exit failed");
         setError(e instanceof Error ? e.message : "exit failed");
       } finally {
         setBusy(null);
@@ -86,8 +89,10 @@ export function usePositionActions(onDone: () => void) {
       setBusy(orderHash);
       try {
         await api.cancelOrder(orderHash, wallet.address);
+        notify.cancelled();
         onDone();
       } catch (e) {
+        notify.error(e, "Cancel failed");
         setError(e instanceof Error ? e.message : "cancel failed");
       } finally {
         setBusy(null);

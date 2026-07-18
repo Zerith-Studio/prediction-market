@@ -24,7 +24,7 @@ func order(maker byte, outcome, side uint8, price uint16, size uint64, salt uint
 
 func mustSubmit(t *testing.T, b *Book, o *models.Order) []Fill {
 	t.Helper()
-	fills, err := b.Submit(o)
+	fills, _, err := b.Submit(o)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestReplayRejected(t *testing.T) {
 	b := NewBook(mkt)
 	o := order(1, models.OutcomeYes, models.SideSell, 60, 10, 1)
 	mustSubmit(t, b, o)
-	if _, err := b.Submit(o); err != ErrDuplicate {
+	if _, _, err := b.Submit(o); err != ErrDuplicate {
 		t.Fatalf("want ErrDuplicate, got %v", err)
 	}
 }
@@ -216,13 +216,13 @@ func TestValidation(t *testing.T) {
 		{order(1, models.OutcomeYes, 2, 50, 10, 5), ErrBadSide},
 	}
 	for _, c := range cases {
-		if _, err := b.Submit(c.o); err != c.want {
+		if _, _, err := b.Submit(c.o); err != c.want {
 			t.Errorf("want %v, got %v", c.want, err)
 		}
 	}
 	expired := order(1, models.OutcomeYes, models.SideBuy, 50, 10, 6)
 	expired.Expiry = time.Now().Unix() - 1
-	if _, err := b.Submit(expired); err != ErrExpired {
+	if _, _, err := b.Submit(expired); err != ErrExpired {
 		t.Errorf("want ErrExpired, got %v", err)
 	}
 }
@@ -254,6 +254,68 @@ func TestLoadRestingDoesNotMatch(t *testing.T) {
 	snap := b.Snapshot()
 	if len(snap.Asks[models.OutcomeYes]) != 1 || len(snap.Bids[models.OutcomeYes]) != 1 {
 		t.Fatalf("both loaded orders must rest: %+v", snap)
+	}
+}
+
+func TestSelfTradePreventionFallsThroughToOtherMaker(t *testing.T) {
+	// A taker never fills against its OWN resting order, even when that order is
+	// the best price: it's cancelled (cancel-resting) and reported back, and the
+	// taker fills against the next (other-owned) maker instead.
+	b := NewBook(mkt)
+	self := order(7, models.OutcomeYes, models.SideSell, 60, 40, 1)  // best ask — but wallet 7's own
+	other := order(9, models.OutcomeYes, models.SideSell, 62, 40, 2) // next ask, someone else
+	mustSubmit(t, b, self)
+	mustSubmit(t, b, other)
+
+	taker := order(7, models.OutcomeYes, models.SideBuy, 65, 40, 3) // wallet 7 buys across both
+	fills, stp, err := b.Submit(taker)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if len(stp) != 1 || stp[0] != models.OrderHash(self) {
+		t.Fatalf("wallet 7's own sell must be STP-cancelled, got %v", stp)
+	}
+	if len(fills) != 1 {
+		t.Fatalf("taker should fill exactly once (against wallet 9), got %d", len(fills))
+	}
+	if fills[0].Maker.Order.Maker != other.Maker || fills[0].Size != 40 || fills[0].Price != 62 {
+		t.Fatalf("fill should be against wallet 9 @62 size 40, got maker=%v price=%d size=%d",
+			fills[0].Maker.Order.Maker, fills[0].Price, fills[0].Size)
+	}
+	snap := b.Snapshot()
+	if len(snap.Asks[models.OutcomeYes]) != 0 {
+		t.Fatalf("self ask cancelled + other ask filled → no asks: %+v", snap.Asks[models.OutcomeYes])
+	}
+	if len(snap.Bids[models.OutcomeYes]) != 0 {
+		t.Fatalf("taker fully filled → nothing rests: %+v", snap.Bids[models.OutcomeYes])
+	}
+}
+
+func TestSelfTradePreventionOnlySelfLiquidityRests(t *testing.T) {
+	// When the only crossing liquidity is the taker's own, STP cancels it and the
+	// taker rests — no self-trade, and no crossed book (a bare skip would leave the
+	// taker's bid sitting above its own ask).
+	b := NewBook(mkt)
+	self := order(7, models.OutcomeYes, models.SideSell, 60, 40, 1)
+	mustSubmit(t, b, self)
+
+	taker := order(7, models.OutcomeYes, models.SideBuy, 65, 30, 2)
+	fills, stp, err := b.Submit(taker)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if len(fills) != 0 {
+		t.Fatalf("no self-fill expected, got %d", len(fills))
+	}
+	if len(stp) != 1 || stp[0] != models.OrderHash(self) {
+		t.Fatalf("self sell should be STP-cancelled, got %v", stp)
+	}
+	snap := b.Snapshot()
+	if len(snap.Asks[models.OutcomeYes]) != 0 {
+		t.Fatalf("self ask should be cancelled: %+v", snap.Asks[models.OutcomeYes])
+	}
+	if len(snap.Bids[models.OutcomeYes]) != 1 || snap.Bids[models.OutcomeYes][0].Size != 30 {
+		t.Fatalf("taker should rest as a bid of 30: %+v", snap.Bids[models.OutcomeYes])
 	}
 }
 

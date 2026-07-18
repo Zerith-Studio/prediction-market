@@ -88,27 +88,48 @@ func (e *Exchange) RestoreBooks(ctx context.Context) error {
 // SubmitOrder is the single entry point for every signed order (users via REST,
 // the MM bot directly): verify the ed25519 signature (defense in depth — E1
 // re-verifies on-chain), soft-lock collateral in Postgres, cross in memory,
-// mirror the fills, then crank each fill to the chain.
-func (e *Exchange) SubmitOrder(ctx context.Context, o *models.Order) ([32]byte, []matching.Fill, error) {
+// mirror the fills, then crank each fill to the chain. The third return value is
+// the hashes of the caller's OWN resting orders cancelled by self-trade
+// prevention (see matching.Book.Submit) — nil unless the order self-crossed.
+func (e *Exchange) SubmitOrder(ctx context.Context, o *models.Order) ([32]byte, []matching.Fill, [][32]byte, error) {
 	hash := models.OrderHash(o)
 	if !models.VerifyOrderSig(o) {
-		return hash, nil, ErrBadSignature
+		return hash, nil, nil, ErrBadSignature
 	}
 
 	// Postgres first: entry-collateral rules + replay protection live in one
 	// transaction. If the engine then rejects (validation), release via cancel.
 	if err := e.store.PlaceOrder(ctx, o); err != nil {
-		return hash, nil, err
+		return hash, nil, nil, err
 	}
 
 	book := e.book(o.MarketID)
-	fills, err := book.Submit(o)
+	fills, stpCancelled, err := book.Submit(o)
 	if err != nil {
 		// The order never entered the book — undo the placement + lock.
 		if cerr := e.store.CancelOrder(ctx, hash, o.Maker); cerr != nil {
 			e.log.Error("exchange: rollback place after engine reject", "err", cerr)
 		}
-		return hash, nil, err
+		return hash, nil, nil, err
+	}
+
+	// Self-trade prevention: the engine cancelled these of the taker's OWN resting
+	// orders rather than let it fill against itself (cancel-resting). Release each
+	// order's soft-lock in Postgres and tell WS subscribers — same unwind as a user
+	// cancel. The owner is o.Maker by construction (STP only ever cancels self).
+	for _, ch := range stpCancelled {
+		if cerr := e.store.CancelOrder(ctx, ch, o.Maker); cerr != nil {
+			e.log.Error("exchange: release self-trade-prevented order", "err", cerr)
+		}
+		e.hub.Broadcast(ws.Event{
+			Type:     ws.EventOrder,
+			MarketID: models.HashString(o.MarketID),
+			Data: map[string]any{
+				"order_hash": models.HashString(ch),
+				"status":     "cancelled",
+				"reason":     "self_trade_prevention",
+			},
+		})
 	}
 
 	var fillIDs []string
@@ -139,7 +160,7 @@ func (e *Exchange) SubmitOrder(ctx context.Context, o *models.Order) ([32]byte, 
 	} else if len(fillIDs) > 0 {
 		go settle()
 	}
-	return hash, fills, nil
+	return hash, fills, stpCancelled, nil
 }
 
 // Cancel removes a live order everywhere: Postgres (releases the soft-lock),

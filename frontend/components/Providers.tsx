@@ -1,6 +1,7 @@
 "use client";
 
 import { MotionConfig } from "framer-motion";
+import { Toaster } from "sonner";
 import { PitchWalletProvider } from "@/lib/wallet";
 import { WatchlistProvider } from "@/lib/watchlist";
 
@@ -17,6 +18,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <PitchWalletProvider>
         <WatchlistProvider>{children}</WatchlistProvider>
       </PitchWalletProvider>
+      {/* Global action toasts (order / fill / self-trade / cancel / deposit).
+          Text-only — no icons/emoji; meaning comes from the semantic color
+          (green fill, red error, amber self-trade prevention). */}
+      <Toaster
+        position="bottom-right"
+        theme="dark"
+        richColors
+        closeButton
+        icons={{ success: null, error: null, warning: null, info: null, loading: null }}
+        toastOptions={{ classNames: { title: "font-semibold", icon: "hidden" } }}
+      />
     </MotionConfig>
   );
 }
