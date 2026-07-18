@@ -10,7 +10,10 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.pitchmarket.app",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "entitlements": {
+        "com.apple.security.application-groups": ["group.com.pitchmarket.app"]
+      }
     },
     "android": {
       "package": "com.pitchmarket.app",
@@ -43,7 +46,8 @@
         {
           "ios": { "deploymentTarget": "17.5" }
         }
-      ]
+      ],
+      "@bacons/apple-targets"
     ],
     "experiments": {
       "typedRoutes": true,

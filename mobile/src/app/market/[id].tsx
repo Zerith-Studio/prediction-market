@@ -6,6 +6,7 @@ import { useLiveMarket } from "@/lib/useLiveMarket";
 import { usePitchWallet } from "@/lib/wallet";
 import { MatchHeader } from "@/components/MatchHeader";
 import { Ladder } from "@/components/Ladder";
+import { PriceChart } from "@/components/PriceChart";
 import { TradeSheet } from "@/components/TradeSheet";
 import { cents, shares, shortHash } from "@/lib/format";
 
@@ -66,6 +67,7 @@ export default function MarketScreen() {
             </Text>
           )}
         </View>
+        <PriceChart fills={live.fills} history={live.history} up={delta >= 0} />
         <Ladder book={live.book} />
         <View className="px-4 pt-3 pb-24">
           <Text className="text-dim text-[10px] uppercase mb-1">Recent fills</Text>
