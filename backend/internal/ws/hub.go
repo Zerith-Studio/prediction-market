@@ -1,7 +1,8 @@
 // Package ws is the /ws broadcast hub (interface-contract.md §5). Every event
-// carries a type from the pinned six — book_update, fill, order_update,
-// combo_quote, match_state, oneliner — plus routing keys; clients filter
-// client-side (demo scale: one match, a handful of markets).
+// carries a type from the pinned set — book_update, fill, order_update,
+// combo_quote, match_state, oneliner, and comment (added for live comment
+// threads) — plus routing keys; clients filter client-side (demo scale: one
+// match, a handful of markets).
 package ws
 
 import (
@@ -15,7 +16,8 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
-// The six event types of the frozen WS surface.
+// The WS event types. The first six are the original frozen surface; comment was
+// added deliberately for live comment threads (a conscious contract expansion).
 const (
 	EventBookUpdate = "book_update"
 	EventFill       = "fill"
@@ -23,6 +25,7 @@ const (
 	EventComboQuote = "combo_quote"
 	EventMatchState = "match_state"
 	EventOneliner   = "oneliner"
+	EventComment    = "comment"
 )
 
 type Event struct {

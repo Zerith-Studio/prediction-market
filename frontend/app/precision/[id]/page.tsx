@@ -53,7 +53,9 @@ export default function PrecisionPage({ params }: { params: { id: string } }) {
   const pool = useMemo(() => entries.reduce((a, e) => a + e.stake, 0), [entries]);
   const open = status === "open";
   const settled = status === "settled" || status === "void";
-  const stakeMicro = Math.max(0, Math.floor(Number(stake) || 0)) * 1_000_000;
+  const stakeNum = Math.max(0, Math.floor(Number(stake) || 0));
+  const stakeMicro = stakeNum * 1_000_000;
+  const maxStake = Math.floor(balance / 1_000_000);
 
   async function enter() {
     if (!wallet.address) {
@@ -112,7 +114,7 @@ export default function PrecisionPage({ params }: { params: { id: string } }) {
           )}
         </div>
 
-        <section className="rule-t grid gap-10 py-8 sm:grid-cols-[1fr_280px]">
+        <section className="rule-t grid gap-10 py-8 sm:grid-cols-[1fr_320px]">
           <div>
             <div className="mb-8 flex items-baseline gap-8">
               <div>
@@ -186,68 +188,95 @@ export default function PrecisionPage({ params }: { params: { id: string } }) {
             </div>
           </div>
 
-          {/* entry panel */}
+          {/* entry panel — mirrors the market TradePanel: bordered square card,
+              system tokens, big inputs, neutral CTA */}
           <aside>
-            <h2 className="mb-5 text-[13px] font-semibold">Your entry</h2>
-            {entered ? (
-              <p className="font-mono text-[13px] leading-relaxed text-accent">
-                ✓ You're in.
-                <br />
-                <span className="text-dim">
-                  One entry per wallet — closest to the actual number takes the biggest share.
-                </span>
-              </p>
-            ) : !open ? (
-              <p className="font-mono text-[13px] text-dim">
-                {settled ? "Pool settled." : "Entries closed at kickoff."}
-              </p>
-            ) : (
-              <>
-                <label className="mb-5 block">
-                  <span className="mb-1 flex justify-between font-mono text-[11px] text-muted">
-                    <span>Your guess</span>
+            <div className="border border-line p-5 sm:p-6 lg:sticky lg:top-[76px]">
+              <div className="mb-6">
+                <div className="eyebrow">Your entry</div>
+                <h2 className="mt-1 truncate text-[15px] font-semibold text-ink">
+                  {market?.title ?? "…"}
+                </h2>
+              </div>
+
+              {entered ? (
+                <p className="font-mono text-[13px] leading-relaxed text-accent">
+                  ✓ You're in.
+                  <br />
+                  <span className="text-dim">
+                    One entry per wallet — closest to the actual number takes the biggest share.
                   </span>
-                  <div className="flex items-baseline border-b border-line2 pb-1.5 focus-within:border-accent">
+                </p>
+              ) : !open ? (
+                <p className="font-mono text-[13px] text-dim">
+                  {settled ? "Pool settled." : "Entries closed at kickoff."}
+                </p>
+              ) : (
+                <>
+                  {/* your guess — the prominent number */}
+                  <div className="mb-1 eyebrow">Your guess</div>
+                  <div className="mb-6 flex items-baseline border-b border-line2 pb-1.5 transition-colors focus-within:border-accent">
                     <input
                       inputMode="numeric"
                       value={guess}
                       placeholder="0"
                       onChange={(e) => setGuess(e.target.value.replace(/[^0-9]/g, ""))}
-                      className="w-full bg-transparent font-mono text-[22px] font-light text-ink outline-none tnum placeholder:text-dim"
+                      className="w-full bg-transparent font-mono text-[40px] font-light leading-none text-ink outline-none tnum placeholder:text-dim"
                     />
                   </div>
-                </label>
-                <label className="mb-6 block">
-                  <span className="mb-1 flex justify-between font-mono text-[11px] text-muted">
-                    <span>Stake</span>
-                    <span className="text-dim">USDC</span>
-                  </span>
-                  <div className="flex items-baseline border-b border-line2 pb-1.5 focus-within:border-accent">
+
+                  {/* stake */}
+                  <div className="mb-1 flex items-baseline justify-between">
+                    <span className="eyebrow">Stake</span>
+                    <span className="font-mono text-[11px] text-dim">USDC</span>
+                  </div>
+                  <div className="flex items-baseline border-b border-line2 pb-1.5 transition-colors focus-within:border-accent">
                     <input
                       inputMode="numeric"
                       value={stake}
                       onChange={(e) => setStake(e.target.value.replace(/[^0-9]/g, ""))}
-                      className="w-full bg-transparent font-mono text-[22px] font-light text-ink outline-none tnum"
+                      className="w-full bg-transparent font-mono text-[40px] font-light leading-none text-ink outline-none tnum"
                     />
                   </div>
-                </label>
-                <button
-                  onClick={enter}
-                  disabled={busy || guess === "" || stakeMicro === 0}
-                  className="w-full bg-accent px-5 py-3.5 text-[14px] font-semibold text-bg transition-[transform,filter] duration-150 ease-out-strong hover:brightness-110 enabled:active:scale-[0.98] disabled:bg-line2 disabled:text-dim"
-                >
-                  {!wallet.address ? "Connect wallet" : busy ? "Entering…" : "Enter pool"}
-                </button>
-                {error && (
-                  <p className="mt-3 font-mono text-[12px] text-down" role="alert">
-                    {error}
+
+                  {/* stake quick-add chips */}
+                  <div className="mt-3.5 flex flex-wrap gap-2">
+                    {[1, 5, 10].map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => setStake(String(stakeNum + d))}
+                        className="border border-line2 px-3 py-1.5 font-mono text-[12px] text-muted transition-colors hover:border-dim hover:text-ink enabled:active:scale-[0.97]"
+                      >
+                        +{d}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setStake(String(maxStake))}
+                      disabled={!wallet.address || maxStake <= 0}
+                      className="border border-line2 px-3 py-1.5 font-mono text-[12px] text-muted transition-colors hover:border-dim hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 enabled:active:scale-[0.97]"
+                    >
+                      MAX
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={enter}
+                    disabled={busy || guess === "" || stakeMicro === 0}
+                    className="mt-6 w-full bg-ink px-5 py-3.5 text-[14px] font-semibold text-bg transition-[transform,filter] duration-150 ease-out-strong hover:brightness-90 enabled:active:scale-[0.98] disabled:bg-line2 disabled:text-dim"
+                  >
+                    {!wallet.address ? "Connect wallet" : busy ? "Entering…" : "Enter pool"}
+                  </button>
+                  {error && (
+                    <p className="mt-3 font-mono text-[12px] text-down" role="alert">
+                      {error}
+                    </p>
+                  )}
+                  <p className="mt-4 font-mono text-[11px] leading-relaxed text-dim">
+                    Scoring: 1/(1+|guess−actual|/s)² — closeness pays, exact hits pay most.
                   </p>
-                )}
-                <p className="mt-3 font-mono text-[11px] leading-relaxed text-dim">
-                  Scoring: 1/(1+|guess−actual|/s)² — closeness pays, exact hits pay most.
-                </p>
-              </>
-            )}
+                </>
+              )}
+            </div>
           </aside>
         </section>
       </main>

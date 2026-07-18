@@ -33,6 +33,19 @@ export function shares(n: number): string {
   return n.toLocaleString("en-US");
 }
 
+/** compact relative time from an ISO timestamp -> "3h ago", "2d ago", "now" */
+export function relTime(iso: string): string {
+  const then = Date.parse(iso);
+  if (!then) return "";
+  const s = Math.max(0, (Date.now() - then) / 1000);
+  if (s < 90) return "now";
+  const m = s / 60;
+  if (m < 60) return `${Math.round(m)}m ago`;
+  const h = m / 60;
+  if (h < 24) return `${Math.round(h)}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
 /** short hash for display: "7f3a…c2e1" */
 export function shortHash(h: string, lead = 4, tail = 4): string {
   if (h.length <= lead + tail) return h;

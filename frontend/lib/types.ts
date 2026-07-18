@@ -70,6 +70,7 @@ export interface Market {
   status: MarketStatus;
   outcome?: { winner?: "YES" | "NO"; value?: number; void?: boolean } | null;
   chain_tx?: string;
+  featured_rank?: number | null; // set = pinned to the featured hero (admin)
 }
 
 export interface BookLevel {
@@ -165,6 +166,41 @@ export interface ComboResult {
   stake_micro: number;
   payout_micro: number;
   resolve_tx?: string;
+}
+
+// One hourly Breaking News item: a REAL Exa article tied to a market, with a
+// real Yes% snapshot + momentum delta. Rendered in the markets-index panel.
+export interface NewsItem {
+  match_id: string;
+  market_id: string; // 64-hex
+  home: string;
+  away: string;
+  question: string; // representative market title
+  headline: string; // real article title
+  summary?: string; // grounded one-sentence condense (or the raw excerpt)
+  source?: string; // source domain
+  url: string; // real article URL
+  published_at?: string;
+  yes_pct?: number | null;
+  delta?: number | null; // Yes% change vs the previous snapshot
+  generated_at: string;
+}
+
+// One market comment. wallet is a client-claimed identity (comments are
+// unsigned). replies is built client-side by nesting on parent_id.
+export interface Comment {
+  id: string;
+  market_id: string;
+  parent_id?: string | null;
+  wallet: string;
+  avatar_seed: string; // users.avatar_seed, else the wallet
+  body: string;
+  deleted: boolean;
+  edited: boolean;
+  like_count: number;
+  liked: boolean;
+  created_at: string;
+  replies?: Comment[];
 }
 
 export interface Portfolio {

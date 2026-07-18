@@ -434,6 +434,42 @@ func (s *Server) handleAdminSetPrice(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type adminPinDTO struct {
+	// Pinned toggles featured state; Rank optionally sets an explicit order
+	// (defaults to 100 when pinning without one). Ignored when Pinned is false.
+	Pinned bool `json:"pinned"`
+	Rank   *int `json:"rank,omitempty"`
+}
+
+// handleAdminPinMarket pins/unpins a market for the featured hero on the markets
+// index (featured_rank NULL = unpinned). Lower rank = higher priority.
+func (s *Server) handleAdminPinMarket(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.marketFromPath(w, r)
+	if !ok {
+		return
+	}
+	var d adminPinDTO
+	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+		httpError(w, http.StatusBadRequest, "bad payload: "+err.Error())
+		return
+	}
+	var rank *int
+	if d.Pinned {
+		rank = d.Rank
+		if rank == nil {
+			def := 100
+			rank = &def
+		}
+	}
+	if err := s.store.SetMarketFeatured(r.Context(), m.MarketID, rank); err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"market_id": models.HashString(m.MarketID), "featured_rank": rank,
+	})
+}
+
 // handleAdminResolveFixture fires the full cascade from a final score: every
 // binary market resolves on-chain, precision pools settle, combos sweep.
 func (s *Server) handleAdminResolveFixture(w http.ResponseWriter, r *http.Request) {

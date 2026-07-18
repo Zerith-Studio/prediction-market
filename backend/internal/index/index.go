@@ -8,6 +8,7 @@ package index
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gagliardetto/solana-go"
@@ -79,21 +80,41 @@ func (p *RPCPoller) Events(ctx context.Context) (<-chan OrderStatusEvent, error)
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				p.pollOnce(ctx, out)
+				if stop := p.pollOnce(ctx, out); stop {
+					return
+				}
 			}
 		}
 	}()
 	return out, nil
 }
 
-func (p *RPCPoller) pollOnce(ctx context.Context, out chan<- OrderStatusEvent) {
+// unsupportedRPC reports an RPC error that won't fix itself by retrying — the
+// provider's plan doesn't offer this method (e.g. Alchemy's free tier rejects
+// getProgramAccounts). Polling on is pointless: it only spams the log and burns
+// request quota the crank needs for settlement.
+func unsupportedRPC(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "not available") ||
+		strings.Contains(s, "not supported") ||
+		strings.Contains(s, "-32600")
+}
+
+// pollOnce runs one reconciliation sweep. It returns stop=true when the RPC
+// provider can't serve getProgramAccounts at all, so the caller shuts the
+// poller down instead of retrying every tick forever.
+func (p *RPCPoller) pollOnce(ctx context.Context, out chan<- OrderStatusEvent) (stop bool) {
 	span := uint64(orderStatusSpan)
 	res, err := p.Client.GetProgramAccountsWithOpts(ctx, p.ProgramID, &rpc.GetProgramAccountsOpts{
 		Filters: []rpc.RPCFilter{{DataSize: span}},
 	})
 	if err != nil {
+		if unsupportedRPC(err) {
+			p.log.Warn("index: getProgramAccounts unsupported on this RPC plan — disabling chain-reconciliation poller (settlement is unaffected)", "err", err)
+			return true
+		}
 		p.log.Warn("index: getProgramAccounts", "err", err)
-		return
+		return false
 	}
 	for _, acc := range res {
 		data := acc.Account.Data.GetBinary()
@@ -108,7 +129,8 @@ func (p *RPCPoller) pollOnce(ctx context.Context, out chan<- OrderStatusEvent) {
 		select {
 		case out <- ev:
 		case <-ctx.Done():
-			return
+			return false
 		}
 	}
+	return false
 }

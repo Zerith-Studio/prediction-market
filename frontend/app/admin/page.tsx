@@ -23,6 +23,7 @@ import {
 } from "@/lib/adminApi";
 import { TopBar } from "@/components/TopBar";
 import { VerifyLink } from "@/components/VerifyLink";
+import { AdminComments } from "@/components/AdminComments";
 
 const FRANCE_ENGLAND = "18257865"; // the Jul 18 dry-run fixture — pinned
 
@@ -501,6 +502,7 @@ function MarketRow({
   const [err, setErr] = useState<string | null>(null);
 
   const resolved = m.status === "settled" || m.status === "void";
+  const pinned = m.featured_rank != null;
 
   async function resolve(outcome: string, val?: number) {
     setBusy("resolve");
@@ -546,6 +548,21 @@ function MarketRow({
       await admin.setPrice(m.market_id, Number(price));
       notify(m.title, `bot quoting @ ${price}¢`, "");
       setPrice("");
+      onChanged();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Pin/unpin this market to the featured hero on the markets index.
+  async function togglePin() {
+    setBusy("pin");
+    setErr(null);
+    try {
+      await admin.pin(m.market_id, !pinned);
+      notify(m.title, pinned ? "unpinned from hero" : "pinned to hero", "");
       onChanged();
     } catch (e) {
       setErr((e as Error).message);
@@ -653,6 +670,14 @@ function MarketRow({
                   </button>
                 </span>
               )}
+              <button
+                onClick={togglePin}
+                disabled={busy === "pin"}
+                title="Feature this market in the hero on the markets index"
+                className={ghostBtn + (pinned ? " text-accent hover:brightness-110" : "")}
+              >
+                {busy === "pin" ? "…" : pinned ? "★ pinned" : "☆ pin"}
+              </button>
               <button onClick={() => op("clear")} disabled={busy === "clear"} className={ghostBtn}>
                 {busy === "clear" ? "…" : "clear orders"}
               </button>
@@ -670,6 +695,7 @@ function MarketRow({
           {err}
         </p>
       )}
+      <AdminComments marketId={m.market_id} />
     </div>
   );
 }

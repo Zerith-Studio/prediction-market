@@ -111,12 +111,20 @@ func (s *Server) Routes() *http.ServeMux {
 	// Markets & matches
 	mux.HandleFunc("GET /matches", s.handleListMatches)
 	mux.HandleFunc("GET /matches/{id}", s.handleGetMatch)
+	mux.HandleFunc("GET /news", s.handleGetBreakingNews)
 	mux.HandleFunc("GET /markets", s.handleListMarkets)
 	mux.HandleFunc("GET /markets/{id}", s.handleGetMarket)
 	mux.HandleFunc("GET /markets/{id}/book", s.handleGetBook)
 	mux.HandleFunc("GET /markets/{id}/fills", s.handleGetFills)
 	mux.HandleFunc("GET /markets/{id}/settlement", s.handleGetSettlement)
 	mux.HandleFunc("GET /markets/{id}/oneliners", s.handleGetOneliners)
+
+	// Comments (per-market threads; unsigned wallet-claim)
+	mux.HandleFunc("GET /markets/{id}/comments", s.handleGetComments)
+	mux.HandleFunc("POST /markets/{id}/comments", s.handlePostComment)
+	mux.HandleFunc("POST /comments/{id}/like", s.handleLikeComment)
+	mux.HandleFunc("POST /comments/{id}/edit", s.handleEditComment)
+	mux.HandleFunc("POST /comments/{id}/delete", s.handleDeleteOwnComment)
 
 	// Combos (RFQ)
 	mux.HandleFunc("POST /combos", s.handleCreateRFQ)
@@ -148,6 +156,8 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /admin/markets/{id}/close", s.adminGuard(s.handleAdminCloseMarket))
 	mux.HandleFunc("POST /admin/markets/{id}/cancel-orders", s.adminGuard(s.handleAdminCancelOrders))
 	mux.HandleFunc("POST /admin/markets/{id}/price", s.adminGuard(s.handleAdminSetPrice))
+	mux.HandleFunc("POST /admin/markets/{id}/pin", s.adminGuard(s.handleAdminPinMarket))
+	mux.HandleFunc("DELETE /admin/comments/{id}", s.adminGuard(s.handleAdminDeleteComment))
 	mux.HandleFunc("GET /admin/ops", s.adminGuard(s.handleAdminOps))
 
 	// Ops
@@ -330,6 +340,21 @@ func (s *Server) handleGetMatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, matchJSON(m, true))
 }
 
+// handleGetBreakingNews returns the latest hourly breaking-news batch (real Exa
+// articles + real Yes%/delta) for the markets index. Degrades to an empty list
+// rather than erroring — the panel simply hides when there's nothing fresh.
+func (s *Server) handleGetBreakingNews(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.LatestBreakingNews(r.Context(), 6*time.Hour, 12)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}})
+		return
+	}
+	if items == nil {
+		items = []store.NewsRow{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 func marketJSON(m store.MarketRow) map[string]any {
 	out := map[string]any{
 		"id": m.ID, "market_id": models.HashString(m.MarketID), "match_id": m.MatchID,
@@ -341,6 +366,9 @@ func marketJSON(m store.MarketRow) map[string]any {
 	}
 	if m.ChainTx != "" {
 		out["chain_tx"] = m.ChainTx
+	}
+	if m.FeaturedRank != nil {
+		out["featured_rank"] = *m.FeaturedRank
 	}
 	return out
 }

@@ -37,7 +37,7 @@ async function safeText(res: Response): Promise<string> {
 }
 
 async function req<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -98,6 +98,7 @@ export interface AdminMarket {
   outcome?: { result?: string; actual?: number; score?: string } | null;
   chain_tx?: string;
   created_at: string;
+  featured_rank?: number | null; // set = pinned to the featured hero
   book?: AdminMarketBook;
 }
 
@@ -191,6 +192,18 @@ export const admin = {
       "POST",
       `/admin/markets/${marketId}/price`,
       { price },
+    ),
+
+  // Soft-delete a comment (operator moderation).
+  deleteComment: (commentId: string) =>
+    req<{ deleted: string }>("DELETE", `/admin/comments/${commentId}`),
+
+  // Pin (pinned=true) or unpin a market for the featured hero on the index.
+  pin: (marketId: string, pinned: boolean, rank?: number) =>
+    req<{ market_id: string; featured_rank: number | null }>(
+      "POST",
+      `/admin/markets/${marketId}/pin`,
+      rank != null ? { pinned, rank } : { pinned },
     ),
 
   resolveFixture: (fixtureId: string, score: FinalScore) =>
