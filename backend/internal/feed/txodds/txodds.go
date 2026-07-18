@@ -459,6 +459,7 @@ func (p *Provider) handleScore(s wireScore) {
 
 	action := strings.ToLower(s.Action)
 	var emit feed.EventType
+	halftime := false // also fire EventHalfTime so 1H markets settle at the break
 
 	switch {
 	case action == "kickoff" || (action == "period_start" && !st.kickedOff):
@@ -482,6 +483,7 @@ func (p *Provider) handleScore(s wireScore) {
 		}
 		st.period = "HT"
 		emit = feed.EventScore
+		halftime = true
 	case action == "period_start" && st.kickedOff:
 		st.period = "2H"
 		emit = feed.EventScore
@@ -525,6 +527,11 @@ func (p *Provider) handleScore(s wireScore) {
 
 	if emit != "" {
 		p.broadcast(fixtureID, feed.MatchEvent{FixtureID: fixtureID, Type: emit, Payload: payload})
+	}
+	// Half-time reached: fire EventHalfTime (same payload) so markets whose outcome
+	// is final at the break settle now instead of at full time.
+	if halftime {
+		p.broadcast(fixtureID, feed.MatchEvent{FixtureID: fixtureID, Type: feed.EventHalfTime, Payload: payload})
 	}
 	if lineups != nil {
 		p.broadcast(fixtureID, feed.MatchEvent{FixtureID: fixtureID, Type: feed.EventLineup, Payload: lineups})

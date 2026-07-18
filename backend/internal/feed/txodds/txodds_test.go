@@ -102,13 +102,21 @@ func TestScoreFolding(t *testing.T) {
 	p.handleScore(ft)
 
 	events := drain(ch)
-	if len(events) != 5 {
-		t.Fatalf("want 5 events, got %d: %+v", len(events), events)
+	if len(events) != 6 {
+		t.Fatalf("want 6 events, got %d: %+v", len(events), events)
 	}
 	if events[0].Type != feed.EventKickoff {
 		t.Errorf("first event: %s", events[0].Type)
 	}
-	final := events[4]
+	// halftime_finalised emits an EventScore (period HT) followed by EventHalfTime
+	// so markets decided at the break can settle early.
+	if events[3].Type != feed.EventHalfTime {
+		t.Fatalf("expected half_time event at index 3, got %s", events[3].Type)
+	}
+	if htp := events[3].Payload.(map[string]any); htp["ht_home_goals"] != 1 || htp["ht_away_goals"] != 0 {
+		t.Errorf("half-time event payload: %+v", htp)
+	}
+	final := events[5]
 	if final.Type != feed.EventFullTime {
 		t.Fatalf("last event: %s", final.Type)
 	}
