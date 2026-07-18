@@ -142,6 +142,8 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /wallet/deposit", s.handleDeposit)
 	mux.HandleFunc("POST /wallet/deposit-init", s.handleDepositInit)
 	mux.HandleFunc("POST /wallet/deposit-complete", s.handleDepositComplete)
+	mux.HandleFunc("POST /wallet/redeem-init", s.handleRedeemInit)
+	mux.HandleFunc("POST /wallet/redeem-complete", s.handleRedeemComplete)
 	mux.HandleFunc("GET /balance", s.handleBalance)
 	mux.HandleFunc("GET /portfolio", s.handlePortfolio)
 
@@ -781,6 +783,125 @@ func (s *Server) handleDepositComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tx": txSig, "balance": b})
+}
+
+// handleRedeemInit builds the winner's on-chain redeem tx to sign (the trustless
+// claim). The market must be settled to yes/no and the caller must hold winning
+// shares. The user signs the returned message, then POST /wallet/redeem-complete.
+func (s *Server) handleRedeemInit(w http.ResponseWriter, r *http.Request) {
+	if s.chain == nil {
+		httpError(w, http.StatusConflict, "off-chain mirror mode — winners are auto-credited, no claim needed")
+		return
+	}
+	var req struct {
+		Wallet   string `json:"wallet"`
+		MarketID string `json:"market_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	pk, err := models.ParsePubkey(req.Wallet)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "bad wallet")
+		return
+	}
+	marketID, err := models.ParseHash(req.MarketID)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "bad market_id")
+		return
+	}
+	m, err := s.store.GetMarket(r.Context(), marketID)
+	if err != nil {
+		httpError(w, http.StatusNotFound, "market not found")
+		return
+	}
+	result := winnerOf(m)
+	if m.Status != "settled" || (result != "yes" && result != "no") {
+		httpError(w, http.StatusConflict, "market is not settled to a redeemable (yes/no) outcome")
+		return
+	}
+	outcome := uint8(models.OutcomeNo)
+	if result == "yes" {
+		outcome = models.OutcomeYes
+	}
+	yes, no, err := s.store.PositionFor(r.Context(), req.Wallet, marketID)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	amount := no
+	if result == "yes" {
+		amount = yes
+	}
+	if amount == 0 {
+		httpError(w, http.StatusConflict, "no winning shares to claim")
+		return
+	}
+	id, msgB64, err := s.chain.PrepareRedeem(r.Context(), solana.PublicKeyFromBytes(pk[:]), marketID, outcome, amount)
+	if err != nil {
+		httpError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"redeem_id": id, "message_b64": msgB64, "amount": amount, "outcome": result})
+}
+
+// handleRedeemComplete submits the user-signed redeem on-chain, then mirrors the
+// payout (credit balance + clear the position) so the ledger follows the chain.
+func (s *Server) handleRedeemComplete(w http.ResponseWriter, r *http.Request) {
+	if s.chain == nil {
+		httpError(w, http.StatusConflict, "off-chain mirror mode")
+		return
+	}
+	var req struct {
+		RedeemID string `json:"redeem_id"`
+		Wallet   string `json:"wallet"`
+		MarketID string `json:"market_id"`
+		Sig      string `json:"sig"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	sig, err := models.ParseSig(req.Sig)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	marketID, err := models.ParseHash(req.MarketID)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "bad market_id")
+		return
+	}
+	txSig, _, err := s.chain.CompleteRedeem(r.Context(), req.RedeemID, sig)
+	if err != nil {
+		httpError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	m, err := s.store.GetMarket(r.Context(), marketID)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	credited, err := s.store.RedeemPosition(r.Context(), req.Wallet, marketID, winnerOf(m))
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	b, _ := s.store.GetBalance(r.Context(), req.Wallet)
+	writeJSON(w, http.StatusOK, map[string]any{"tx": txSig, "amount": credited, "balance": b})
+}
+
+// winnerOf returns "yes"|"no"|"void"|"" from a settled market's outcome blob.
+func winnerOf(m store.MarketRow) string {
+	if len(m.Outcome) == 0 {
+		return ""
+	}
+	var oc struct {
+		Result string `json:"result"`
+	}
+	_ = json.Unmarshal(m.Outcome, &oc)
+	return oc.Result
 }
 
 // handleDeposit mirrors an on-chain vault deposit into the demo ledger.

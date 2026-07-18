@@ -239,6 +239,9 @@ func (s *Service) ResolveFixture(ctx context.Context, fixtureID string, final Fi
 			if err := s.store.SettleMarket(ctx, marketID, outcomeJSON, txSig, status); err != nil {
 				return err
 			}
+			if err := s.autoRedeem(ctx, marketID, result); err != nil {
+				return err
+			}
 
 		case "precision":
 			actual, ok := precisionActual(t.Key, final)
@@ -260,6 +263,17 @@ func (s *Service) ResolveFixture(ctx context.Context, fixtureID string, final Fi
 	s.log.Info("lifecycle: fixture resolved", "fixture", fixtureID,
 		"score", fmt.Sprintf("%d-%d", final.HomeGoals, final.AwayGoals))
 	return nil
+}
+
+// autoRedeem pays a resolved binary market's winners off-chain — but ONLY in
+// mirror mode. On-chain, winners claim their funds via the redeem ix (the
+// /wallet/redeem-* flow), so crediting here would double-pay. s.Creator is nil
+// exactly in mirror mode.
+func (s *Service) autoRedeem(ctx context.Context, marketID [32]byte, result string) error {
+	if s.Creator != nil {
+		return nil
+	}
+	return s.store.RedeemBinaryWinners(ctx, marketID, result)
 }
 
 // ResolveHalfTime settles the templates whose outcome is final at half time
@@ -297,6 +311,9 @@ func (s *Service) ResolveHalfTime(ctx context.Context, fixtureID string, ht Fina
 			"ht_score": fmt.Sprintf("%d-%d", ht.HTHomeGoals, ht.HTAwayGoals),
 		})
 		if err := s.store.SettleMarket(ctx, marketID, outcomeJSON, txSig, status); err != nil {
+			return err
+		}
+		if err := s.autoRedeem(ctx, marketID, result); err != nil {
 			return err
 		}
 		resolved++
@@ -342,6 +359,9 @@ func (s *Service) ResolveMarketManually(ctx context.Context, marketID [32]byte, 
 		if err := s.store.SettleMarket(ctx, marketID, outcomeJSON, txSig, status); err != nil {
 			return txSig, err
 		}
+		if err := s.autoRedeem(ctx, marketID, outcome); err != nil {
+			return txSig, err
+		}
 
 	case "precision":
 		if outcome == "void" {
@@ -385,7 +405,9 @@ func (s *Service) voidFixture(ctx context.Context, fixtureID string) error {
 			err = s.store.VoidPrecision(ctx, marketID)
 		} else {
 			outcomeJSON, _ := json.Marshal(map[string]any{"result": "void"})
-			err = s.store.SettleMarket(ctx, marketID, outcomeJSON, "", "void")
+			if err = s.store.SettleMarket(ctx, marketID, outcomeJSON, "", "void"); err == nil {
+				err = s.autoRedeem(ctx, marketID, "void")
+			}
 		}
 		if err != nil && err != store.ErrNotFound {
 			return err

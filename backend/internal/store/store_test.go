@@ -623,6 +623,10 @@ func TestSettleRedeemsBinaryWinners(t *testing.T) {
 	if err := s.SettleMarket(ctx, marketID, []byte(`{"result":"yes"}`), "", "settled"); err != nil {
 		t.Fatalf("SettleMarket: %v", err)
 	}
+	// Off-chain auto-payout (the lifecycle calls this in mirror mode).
+	if err := s.RedeemBinaryWinners(ctx, marketID, "yes"); err != nil {
+		t.Fatalf("RedeemBinaryWinners: %v", err)
+	}
 
 	// Winner: 20 YES × $1 = +20_000_000 → 30_000_000; loser unchanged.
 	if b, _ := s.GetBalance(ctx, w1); b.Available != 30_000_000 {
@@ -639,6 +643,38 @@ func TestSettleRedeemsBinaryWinners(t *testing.T) {
 				t.Errorf("position not cleared after settle: %+v", p)
 			}
 		}
+	}
+}
+
+// TestRedeemPositionClaim: the per-user claim path (on-chain mode) credits just
+// that holder and clears their position, returning the amount.
+func TestRedeemPositionClaim(t *testing.T) {
+	s := storetest.Open(t)
+	var marketID [32]byte
+	marketID[0] = 13
+	seedMarket(t, s, marketID)
+	_, w := wallet(1)
+	s.Deposit(ctx, w, 5_000_000)
+	if err := s.GrantTokens(ctx, w, marketID, 40, 0); err != nil { // 40 YES
+		t.Fatal(err)
+	}
+	// Market settled YES; the winner claims their 40 YES.
+	if err := s.SettleMarket(ctx, marketID, []byte(`{"result":"yes"}`), "", "settled"); err != nil {
+		t.Fatal(err)
+	}
+	credited, err := s.RedeemPosition(ctx, w, marketID, "yes")
+	if err != nil {
+		t.Fatalf("RedeemPosition: %v", err)
+	}
+	if credited != 40_000_000 { // 40 × $1
+		t.Errorf("claim credited %d, want 40_000_000", credited)
+	}
+	if b, _ := s.GetBalance(ctx, w); b.Available != 45_000_000 {
+		t.Errorf("balance after claim = %d, want 45_000_000", b.Available)
+	}
+	// Idempotent: a second claim (no shares left) credits nothing.
+	if again, _ := s.RedeemPosition(ctx, w, marketID, "yes"); again != 0 {
+		t.Errorf("second claim must credit 0, got %d", again)
 	}
 }
 

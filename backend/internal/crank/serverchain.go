@@ -32,6 +32,7 @@ type ChainOps struct {
 	mu       sync.Mutex
 	atas     map[string]bool            // "owner:mint" → known-exists
 	deposits map[string]*pendingDeposit // deposit id → awaiting user signature
+	redeems  map[string]*pendingRedeem  // redeem id → awaiting user signature
 }
 
 type pendingDeposit struct {
@@ -41,11 +42,21 @@ type pendingDeposit struct {
 	created time.Time
 }
 
+type pendingRedeem struct {
+	tx       *solana.Transaction
+	user     solana.PublicKey
+	marketID [32]byte
+	outcome  uint8
+	amount   uint64
+	created  time.Time
+}
+
 func NewChainOps(client *rpc.Client, builder *TxBuilder, operator solana.PrivateKey, log *slog.Logger) *ChainOps {
 	return &ChainOps{
 		Client: client, Builder: builder, Operator: operator, Log: log,
 		atas:     make(map[string]bool),
 		deposits: make(map[string]*pendingDeposit),
+		redeems:  make(map[string]*pendingRedeem),
 	}
 }
 
@@ -342,6 +353,98 @@ func (c *ChainOps) CompleteDeposit(ctx context.Context, depositID string, userSi
 	}
 	c.Log.Info("chain: deposit confirmed", "user", pd.user, "amount", pd.amount, "tx", sig)
 	return sig.String(), nil
+}
+
+// --- two-step real redeem (winner claims a resolved binary market) --------------
+
+// PrepareRedeem builds the winner's one signed transaction: ensure their USDC ATA
+// exists (redeem transfers pool USDC → that ATA), then `redeem` burns `amount`
+// winning shares and pays USDC 1:1. Operator co-signs (fee payer); the USER signs
+// the returned serialized message client-side. Returns (redeemID, base64 message).
+func (c *ChainOps) PrepareRedeem(ctx context.Context, user solana.PublicKey, marketID [32]byte, outcome uint8, amount uint64) (string, string, error) {
+	if amount == 0 {
+		return "", "", fmt.Errorf("crank: nothing to redeem")
+	}
+	var ixs []solana.Instruction
+	if ix, _, err := c.ensureATAIx(ctx, user, c.Builder.USDCMint); err == nil && ix != nil {
+		ixs = append(ixs, ix)
+	}
+	redeemIx, err := c.Builder.RedeemIx(marketID, user, outcome, amount)
+	if err != nil {
+		return "", "", err
+	}
+	ixs = append(ixs, redeemIx)
+
+	recent, err := c.Client.GetLatestBlockhash(ctx, rpc.CommitmentFinalized)
+	if err != nil {
+		return "", "", err
+	}
+	tx, err := solana.NewTransaction(ixs, recent.Value.Blockhash, solana.TransactionPayer(c.Operator.PublicKey()))
+	if err != nil {
+		return "", "", err
+	}
+	msg, err := tx.Message.MarshalBinary()
+	if err != nil {
+		return "", "", err
+	}
+	var idBytes [12]byte
+	if _, err := rand.Read(idBytes[:]); err != nil {
+		return "", "", err
+	}
+	id := hex.EncodeToString(idBytes[:])
+	c.mu.Lock()
+	c.redeems[id] = &pendingRedeem{tx: tx, user: user, marketID: marketID, outcome: outcome, amount: amount, created: time.Now()}
+	for k, r := range c.redeems { // sweep stale
+		if time.Since(r.created) > 2*time.Minute {
+			delete(c.redeems, k)
+		}
+	}
+	c.mu.Unlock()
+	return id, base64.StdEncoding.EncodeToString(msg), nil
+}
+
+// CompleteRedeem attaches the user's signature, co-signs as operator, submits and
+// confirms the redeem. Returns (txSig, redeemedAmount).
+func (c *ChainOps) CompleteRedeem(ctx context.Context, redeemID string, userSig [64]byte) (string, uint64, error) {
+	c.mu.Lock()
+	pr := c.redeems[redeemID]
+	delete(c.redeems, redeemID)
+	c.mu.Unlock()
+	if pr == nil {
+		return "", 0, fmt.Errorf("crank: unknown or expired redeem %s", redeemID)
+	}
+
+	msg, err := pr.tx.Message.MarshalBinary()
+	if err != nil {
+		return "", 0, err
+	}
+	opSig, err := c.Operator.Sign(msg)
+	if err != nil {
+		return "", 0, err
+	}
+	pr.tx.Signatures = nil
+	for _, key := range pr.tx.Message.AccountKeys[:pr.tx.Message.Header.NumRequiredSignatures] {
+		switch {
+		case key.Equals(c.Operator.PublicKey()):
+			pr.tx.Signatures = append(pr.tx.Signatures, opSig)
+		case key.Equals(pr.user):
+			pr.tx.Signatures = append(pr.tx.Signatures, solana.SignatureFromBytes(userSig[:]))
+		default:
+			return "", 0, fmt.Errorf("crank: unexpected required signer %s", key)
+		}
+	}
+	if err := pr.tx.VerifySignatures(); err != nil {
+		return "", 0, fmt.Errorf("crank: redeem signature invalid: %w", err)
+	}
+	sig, err := c.Client.SendTransactionWithOpts(ctx, pr.tx, rpc.TransactionOpts{PreflightCommitment: rpc.CommitmentConfirmed})
+	if err != nil {
+		return "", 0, fmt.Errorf("crank: send redeem: %w", err)
+	}
+	if err := c.confirm(ctx, sig, 90*time.Second); err != nil {
+		return "", 0, err
+	}
+	c.Log.Info("chain: redeem confirmed", "user", pr.user, "amount", pr.amount, "tx", sig)
+	return sig.String(), pr.amount, nil
 }
 
 func (c *ChainOps) sendOperator(ctx context.Context, ixs []solana.Instruction) (string, error) {
