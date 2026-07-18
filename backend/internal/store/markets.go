@@ -272,6 +272,12 @@ func (s *Store) SetMarketFeatured(ctx context.Context, marketID [32]byte, rank *
 // SettleMarket records the resolved outcome + the on-chain resolve_market tx
 // (the /settlement/[id] "Verified on Solana" link).
 func (s *Store) SettleMarket(ctx context.Context, marketID [32]byte, outcomeJSON []byte, chainTx, status string) error {
+	// outcomeJSON is the binary result blob ({"result":"yes"|"no"|"void"}); the
+	// winner drives the auto-payout below.
+	var oc struct {
+		Result string `json:"result"`
+	}
+	_ = json.Unmarshal(outcomeJSON, &oc)
 	return s.tx(ctx, func(tx pgx.Tx) error {
 		res, err := tx.Exec(ctx, `
 			UPDATE markets SET outcome = $2, chain_tx = $3, status = $4
@@ -284,8 +290,11 @@ func (s *Store) SettleMarket(ctx context.Context, marketID [32]byte, outcomeJSON
 		}
 		// A settled/void market can never match again — cancel every resting order
 		// and return its soft-locked collateral to the maker (atomic with settle).
-		_, err = cancelOpenOrdersForMarket(ctx, tx, marketID[:])
-		return err
+		if _, err := cancelOpenOrdersForMarket(ctx, tx, marketID[:]); err != nil {
+			return err
+		}
+		// Auto-redeem: pay holders the resolved value — winners $1/share, void refunds.
+		return redeemBinaryWinners(ctx, tx, marketID[:], oc.Result)
 	})
 }
 

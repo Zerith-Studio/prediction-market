@@ -601,6 +601,47 @@ func TestSettleReleasesRestingOrders(t *testing.T) {
 	}
 }
 
+// TestSettleRedeemsBinaryWinners: resolving a binary market auto-pays winners
+// ($1/share into balance) and clears positions; losers get nothing.
+func TestSettleRedeemsBinaryWinners(t *testing.T) {
+	s := storetest.Open(t)
+	var marketID [32]byte
+	marketID[0] = 12
+	seedMarket(t, s, marketID)
+
+	_, w1 := wallet(1) // holds YES → winner
+	_, w2 := wallet(2) // holds NO  → loser
+	s.Deposit(ctx, w1, 10_000_000)
+	s.Deposit(ctx, w2, 10_000_000)
+	if err := s.GrantTokens(ctx, w1, marketID, 20, 0); err != nil { // 20 YES
+		t.Fatal(err)
+	}
+	if err := s.GrantTokens(ctx, w2, marketID, 0, 20); err != nil { // 20 NO
+		t.Fatal(err)
+	}
+
+	if err := s.SettleMarket(ctx, marketID, []byte(`{"result":"yes"}`), "", "settled"); err != nil {
+		t.Fatalf("SettleMarket: %v", err)
+	}
+
+	// Winner: 20 YES × $1 = +20_000_000 → 30_000_000; loser unchanged.
+	if b, _ := s.GetBalance(ctx, w1); b.Available != 30_000_000 {
+		t.Errorf("YES winner paid wrong: got %d, want 30_000_000", b.Available)
+	}
+	if b, _ := s.GetBalance(ctx, w2); b.Available != 10_000_000 {
+		t.Errorf("NO loser must get nothing: got %d, want 10_000_000", b.Available)
+	}
+	// Positions cleared for both (redeemed / void).
+	for _, w := range []string{w1, w2} {
+		ps, _ := s.GetPositions(ctx, w)
+		for _, p := range ps {
+			if p.MarketID == marketID && (p.Yes != 0 || p.No != 0) {
+				t.Errorf("position not cleared after settle: %+v", p)
+			}
+		}
+	}
+}
+
 func TestComboLifecycle(t *testing.T) {
 	s := storetest.Open(t)
 	var m1, m2 [32]byte
