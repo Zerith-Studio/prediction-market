@@ -513,7 +513,13 @@ export const api = {
     expiry: number;
     salt: number;
     sig: string;
-  }): Promise<{ order_hash: string; fills: { match_type: string }[] }> {
+  }): Promise<{
+    order_hash: string;
+    fills: { match_type: string }[];
+    // hashes of the caller's OWN resting orders the backend cancelled so this
+    // order wouldn't self-trade (cancel-resting). Empty in the normal case.
+    self_trade_prevented?: string[];
+  }> {
     return post(`/orders`, order);
   },
 
