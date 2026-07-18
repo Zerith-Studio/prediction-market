@@ -20,7 +20,9 @@ import { kindOf } from "@/lib/kinds";
 interface PosCalc {
   p: Position;
   side: "YES" | "NO";
-  qty: number;
+  qty: number; // shares held (gross)
+  locked: number; // shares committed to resting SELL (exit) orders
+  available: number; // qty − locked: exitable now
   entry: number;
   cur: number; // exit mark (BBP) in the held side's terms
   valueMicro: number;
@@ -30,10 +32,12 @@ interface PosCalc {
 function calc(p: Position): PosCalc {
   const side: "YES" | "NO" = p.yes > 0 ? "YES" : "NO";
   const qty = side === "YES" ? p.yes : p.no;
+  const locked = side === "YES" ? p.yes_locked ?? 0 : p.no_locked ?? 0;
+  const available = Math.max(0, qty - locked);
   const cur = p.current > 0 ? (side === "YES" ? p.current : 100 - p.current) : p.avg_cost;
   const valueMicro = qty * cur * 10_000;
   const costMicro = qty * p.avg_cost * 10_000;
-  return { p, side, qty, entry: p.avg_cost, cur, valueMicro, unrealizedMicro: valueMicro - costMicro };
+  return { p, side, qty, locked, available, entry: p.avg_cost, cur, valueMicro, unrealizedMicro: valueMicro - costMicro };
 }
 
 export default function PortfolioPage() {
@@ -64,7 +68,8 @@ export default function PortfolioPage() {
   // Exit: sign a SELL of the full position at the current best bid. Same
   // signing path as the trade panel — the backend can't tell them apart.
   async function exit(x: PosCalc) {
-    if (!wallet.address || x.cur <= 0 || busy) return;
+    // Only the un-locked shares are exitable; the rest are resting in a prior exit.
+    if (!wallet.address || x.cur <= 0 || x.available <= 0 || busy) return;
     setError(null);
     setBusy(x.p.market_id);
     try {
@@ -76,7 +81,7 @@ export default function PortfolioPage() {
         outcome,
         side: 1, // SELL
         price: Math.max(1, x.side === "YES" ? x.cur : 100 - x.cur),
-        size: BigInt(x.qty),
+        size: BigInt(x.available),
         feeBps: 0,
         expiry: 0n,
         salt,
@@ -88,7 +93,7 @@ export default function PortfolioPage() {
         outcome,
         side: 1,
         price: Math.max(1, x.side === "YES" ? x.cur : 100 - x.cur),
-        size: x.qty,
+        size: x.available,
         fee_bps: 0,
         expiry: 0,
         salt: Number(salt),
@@ -264,8 +269,14 @@ export default function PortfolioPage() {
                       <div className="text-right">
                         <button
                           onClick={() => exit(x)}
-                          disabled={busy !== null || x.cur <= 0}
-                          title={x.cur <= 0 ? "No bid to exit into" : `Sell ${fmtShares(x.qty)} @ ${x.cur}¢`}
+                          disabled={busy !== null || x.cur <= 0 || x.available <= 0}
+                          title={
+                            x.available <= 0
+                              ? "All shares are resting in an exit order — cancel it to re-exit"
+                              : x.cur <= 0
+                                ? "No bid to exit into"
+                                : `Sell ${fmtShares(x.available)} @ ${x.cur}¢`
+                          }
                           className="font-mono text-[11px] text-dim transition-colors hover:text-down disabled:opacity-40"
                         >
                           {busy === x.p.market_id ? "exiting…" : "exit"}

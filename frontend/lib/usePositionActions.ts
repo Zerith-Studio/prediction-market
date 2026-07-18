@@ -16,7 +16,9 @@ import { usePitchWallet } from "./wallet";
 export interface PosCalc {
   p: Position;
   side: "YES" | "NO";
-  qty: number;
+  qty: number; // shares held (gross)
+  locked: number; // shares already committed to resting SELL (exit) orders
+  available: number; // qty − locked: what can still be exited right now
   entry: number; // avg cost, cents
   cur: number; // exit mark (BBP) in the held side's terms, cents
   valueMicro: number;
@@ -26,10 +28,12 @@ export interface PosCalc {
 export function calcPosition(p: Position): PosCalc {
   const side: "YES" | "NO" = p.yes > 0 ? "YES" : "NO";
   const qty = side === "YES" ? p.yes : p.no;
+  const locked = side === "YES" ? p.yes_locked ?? 0 : p.no_locked ?? 0;
+  const available = Math.max(0, qty - locked);
   const cur = p.current > 0 ? (side === "YES" ? p.current : 100 - p.current) : p.avg_cost;
   const valueMicro = qty * cur * 10_000;
   const costMicro = qty * p.avg_cost * 10_000;
-  return { p, side, qty, entry: p.avg_cost, cur, valueMicro, unrealizedMicro: valueMicro - costMicro };
+  return { p, side, qty, locked, available, entry: p.avg_cost, cur, valueMicro, unrealizedMicro: valueMicro - costMicro };
 }
 
 export function usePositionActions(onDone: () => void) {
@@ -39,7 +43,9 @@ export function usePositionActions(onDone: () => void) {
 
   const exit = useCallback(
     async (x: PosCalc) => {
-      if (!wallet.address || x.cur <= 0 || busy) return;
+      // Only exit the un-locked shares: the rest are already resting in a prior
+      // exit order, so selling the gross qty would fail "insufficient outcome tokens".
+      if (!wallet.address || x.cur <= 0 || x.available <= 0 || busy) return;
       setError(null);
       setBusy(x.p.market_id);
       try {
@@ -52,7 +58,7 @@ export function usePositionActions(onDone: () => void) {
           outcome,
           side: 1, // SELL
           price,
-          size: BigInt(x.qty),
+          size: BigInt(x.available),
           feeBps: 0,
           expiry: 0n,
           salt,
@@ -64,7 +70,7 @@ export function usePositionActions(onDone: () => void) {
           outcome,
           side: 1,
           price,
-          size: x.qty,
+          size: x.available,
           fee_bps: 0,
           expiry: 0,
           salt: Number(salt),

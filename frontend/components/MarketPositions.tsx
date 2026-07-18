@@ -75,6 +75,11 @@ export function MarketPositions({
                 <div className="min-w-0">
                   <div className="font-mono text-[13px] text-ink tnum">
                     {fmtShares(x.qty)} {x.side}
+                    {x.locked > 0 && (
+                      <span className="ml-2 text-[11px] text-dim">
+                        · {fmtShares(x.locked)} in exit
+                      </span>
+                    )}
                   </div>
                   <div className="mt-0.5 font-mono text-[11px] text-dim tnum">
                     avg {x.entry}¢ · now {x.cur}¢ ·{" "}
@@ -86,8 +91,14 @@ export function MarketPositions({
                 </div>
                 <button
                   onClick={() => exit(x)}
-                  disabled={busy === x.p.market_id || x.cur <= 0}
-                  title={x.cur <= 0 ? "No bid to exit into" : `Sell ${fmtShares(x.qty)} @ ${x.cur}¢`}
+                  disabled={busy === x.p.market_id || x.cur <= 0 || x.available <= 0}
+                  title={
+                    x.available <= 0
+                      ? "All shares are resting in an exit order — cancel it to re-exit"
+                      : x.cur <= 0
+                        ? "No bid to exit into"
+                        : `Sell ${fmtShares(x.available)} @ ${x.cur}¢`
+                  }
                   className="shrink-0 border border-line2 px-3 py-1.5 font-mono text-[12px] text-muted transition-colors hover:border-dim hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 enabled:active:scale-[0.97]"
                 >
                   {busy === x.p.market_id ? "exiting…" : "exit"}

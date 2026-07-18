@@ -467,6 +467,8 @@ export const api = {
           title: titles.get(p.market_id) ?? shortId(p.market_id),
           yes: p.yes,
           no: p.no,
+          yes_locked: p.yes_locked,
+          no_locked: p.no_locked,
           avg_cost: p.avg_cost,
           current: p.best_bid, // BBP mark — the price the position exits at NOW
           realized: p.realized,
