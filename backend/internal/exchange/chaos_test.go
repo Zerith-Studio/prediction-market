@@ -132,7 +132,7 @@ func TestConcurrentTakersNeverOverfill(t *testing.T) {
 	if err := h.st.GrantTokens(ctx, seller.b58, h.mkt, 100, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := h.ex.SubmitOrder(ctx, h.signed(seller, models.OutcomeYes, models.SideSell, 60, 100, 1)); err != nil {
+	if _, _, _, err := h.ex.SubmitOrder(ctx, h.signed(seller, models.OutcomeYes, models.SideSell, 60, 100, 1)); err != nil {
 		t.Fatalf("place resting sell: %v", err)
 	}
 
@@ -155,7 +155,7 @@ func TestConcurrentTakersNeverOverfill(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			_, fills, err := h.ex.SubmitOrder(ctx, h.signed(ws[i], models.OutcomeYes, models.SideBuy, 65, each, uint64(100+i)))
+			_, fills, _, err := h.ex.SubmitOrder(ctx, h.signed(ws[i], models.OutcomeYes, models.SideBuy, 65, each, uint64(100+i)))
 			if err != nil {
 				return
 			}
@@ -208,7 +208,7 @@ func TestMoneyConservedAcrossManyFills(t *testing.T) {
 	}
 	// Rest BUY NO @40 (so a taker BUY YES @60 mints).
 	for i := 0; i < 5; i++ {
-		if _, _, err := h.ex.SubmitOrder(ctx, h.signed(mm, models.OutcomeNo, models.SideBuy, 40, 200, uint64(1+i))); err != nil {
+		if _, _, _, err := h.ex.SubmitOrder(ctx, h.signed(mm, models.OutcomeNo, models.SideBuy, 40, 200, uint64(1+i))); err != nil {
 			t.Fatalf("mm rest: %v", err)
 		}
 	}
@@ -221,7 +221,7 @@ func TestMoneyConservedAcrossManyFills(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 12; i++ {
-		_, _, err := h.ex.SubmitOrder(ctx, h.signed(buyer, models.OutcomeYes, models.SideBuy, 60, 50, uint64(1000+i)))
+		_, _, _, err := h.ex.SubmitOrder(ctx, h.signed(buyer, models.OutcomeYes, models.SideBuy, 60, 50, uint64(1000+i)))
 		if err != nil && !errors.Is(err, store.ErrInsufficientFunds) {
 			t.Fatalf("buyer order %d: %v", i, err)
 		}
@@ -264,7 +264,7 @@ func TestConcurrentReplayFillsOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, err := h.ex.SubmitOrder(ctx, order)
+			_, _, _, err := h.ex.SubmitOrder(ctx, order)
 			switch {
 			case err == nil:
 				ok.Add(1)
@@ -298,7 +298,7 @@ func TestRevertReconcilesMoneyAndBook(t *testing.T) {
 
 	buyer := newWallet(t)
 	h.st.Deposit(ctx, buyer.b58, 100_000_000)
-	_, fills, err := h.ex.SubmitOrder(ctx, h.signed(buyer, models.OutcomeYes, models.SideBuy, 65, 40, 2))
+	_, fills, _, err := h.ex.SubmitOrder(ctx, h.signed(buyer, models.OutcomeYes, models.SideBuy, 65, 40, 2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestRevertReconcilesMoneyAndBook(t *testing.T) {
 	h.sub.fail.Store(false)
 	carol := newWallet(t)
 	h.st.Deposit(ctx, carol.b58, 100_000_000)
-	_, fills2, err := h.ex.SubmitOrder(ctx, h.signed(carol, models.OutcomeYes, models.SideBuy, 65, 40, 3))
+	_, fills2, _, err := h.ex.SubmitOrder(ctx, h.signed(carol, models.OutcomeYes, models.SideBuy, 65, 40, 3))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestHarnessCleanTrade(t *testing.T) {
 	h.ex.SubmitOrder(ctx, h.signed(seller, models.OutcomeYes, models.SideSell, 50, 10, 1))
 	buyer := newWallet(t)
 	h.st.Deposit(ctx, buyer.b58, 100_000_000)
-	_, fills, err := h.ex.SubmitOrder(ctx, h.signed(buyer, models.OutcomeYes, models.SideBuy, 55, 10, 2))
+	_, fills, _, err := h.ex.SubmitOrder(ctx, h.signed(buyer, models.OutcomeYes, models.SideBuy, 55, 10, 2))
 	if err != nil || len(fills) != 1 {
 		t.Fatalf("clean trade failed: %v %v", fills, err)
 	}

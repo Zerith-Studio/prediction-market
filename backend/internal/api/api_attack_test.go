@@ -251,7 +251,7 @@ func TestAttackVectors(t *testing.T) {
 	t.Run("good order still accepted after assault", func(t *testing.T) {
 		seller := newWallet(t)
 		s.st.GrantTokens(ctx, seller.b58, market, 20, 0)
-		if _, _, err := s.ex.SubmitOrder(ctx, signedModelOrder(seller, market, models.OutcomeYes, models.SideSell, 55, 20, 900)); err != nil {
+		if _, _, _, err := s.ex.SubmitOrder(ctx, signedModelOrder(seller, market, models.OutcomeYes, models.SideSell, 55, 20, 900)); err != nil {
 			t.Fatalf("seed sell: %v", err)
 		}
 		d := signedOrderDTO(funded, market, models.OutcomeYes, models.SideBuy, 60, 20, 901)

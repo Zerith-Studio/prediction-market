@@ -256,14 +256,22 @@ func (s *Server) handlePostOrder(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	hash, fills, err := s.ex.SubmitOrder(r.Context(), o)
+	hash, fills, stpCancelled, err := s.ex.SubmitOrder(r.Context(), o)
 	if err != nil {
 		httpError(w, orderErrStatus(err), err.Error())
 		return
 	}
+	// self_trade_prevented: the caller's own resting orders that were cancelled so
+	// this order wouldn't wash-trade against itself (cancel-resting). Lets the UI
+	// tell the trader precisely, in the same response as their fills.
+	stp := make([]string, len(stpCancelled))
+	for i, h := range stpCancelled {
+		stp[i] = models.HashString(h)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"order_hash": models.HashString(hash),
-		"fills":      fillDTOs(fills),
+		"order_hash":           models.HashString(hash),
+		"fills":                fillDTOs(fills),
+		"self_trade_prevented": stp,
 	})
 }
 

@@ -195,7 +195,11 @@ func (s *Store) GetMarket(ctx context.Context, marketID [32]byte) (MarketRow, er
 		`SELECT `+marketColumns+` FROM markets WHERE market_id = $1`, marketID[:]))
 }
 
-// ListMarkets returns markets, optionally filtered by status ("" = all).
+// ListMarkets returns markets, optionally filtered by status ("" = all). Global
+// (match-less) markets from the market builder are included: marketColumns
+// COALESCEs match_id::text, so a NULL scans as "" rather than erroring the whole
+// list (the prior hotfix that excluded them is superseded by real global-market
+// support here — the frontend renders them by scope).
 func (s *Store) ListMarkets(ctx context.Context, status string) ([]MarketRow, error) {
 	q := `SELECT ` + marketColumns + ` FROM markets`
 	args := []any{}

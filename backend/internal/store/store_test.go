@@ -378,7 +378,7 @@ func TestApplyFillNormal(t *testing.T) {
 
 	book := matching.NewBook(marketID)
 	book.LoadResting(maker, 50)
-	fills, err := book.Submit(taker)
+	fills, _, err := book.Submit(taker)
 	if err != nil || len(fills) != 1 {
 		t.Fatalf("engine: %v %v", fills, err)
 	}
@@ -454,7 +454,7 @@ func TestApplyFillMint(t *testing.T) {
 
 	book := matching.NewBook(marketID)
 	book.LoadResting(makerNo, 40)
-	fills, _ := book.Submit(takerYes)
+	fills, _, _ := book.Submit(takerYes)
 	if len(fills) != 1 || fills[0].MatchType != models.MatchMint {
 		t.Fatalf("want MINT fill, got %+v", fills)
 	}
@@ -502,7 +502,7 @@ func TestApplyFillMerge(t *testing.T) {
 
 	book := matching.NewBook(marketID)
 	book.LoadResting(makerNo, 25)
-	fills, _ := book.Submit(takerYes)
+	fills, _, _ := book.Submit(takerYes)
 	if len(fills) != 1 || fills[0].MatchType != models.MatchMerge {
 		t.Fatalf("want MERGE fill, got %+v", fills)
 	}
