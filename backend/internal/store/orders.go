@@ -124,6 +124,52 @@ func (s *Store) CancelOrder(ctx context.Context, hash [32]byte, maker [32]byte) 
 	})
 }
 
+// cancelOpenOrdersForMarket cancels every still-live order on a market and
+// returns each maker's soft-locked collateral. Used on resolution: a settled or
+// void market can never match again, so its resting orders must not leave
+// collateral locked. Runs inside the caller's transaction; returns how many
+// orders were released.
+func cancelOpenOrdersForMarket(ctx context.Context, tx pgx.Tx, marketID []byte) (int, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT order_hash, maker, side, outcome, locked FROM orders
+		WHERE market_id = $1 AND status = 'live'
+		FOR UPDATE`, marketID)
+	if err != nil {
+		return 0, err
+	}
+	type openOrder struct {
+		hash          []byte
+		wallet        string
+		side, outcome int16
+		locked        int64
+	}
+	// Collect first: pgx holds the connection while rows are open, so the balance
+	// updates below can't run until the cursor is drained + closed.
+	var found []openOrder
+	for rows.Next() {
+		var o openOrder
+		if err := rows.Scan(&o.hash, &o.wallet, &o.side, &o.outcome, &o.locked); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		found = append(found, o)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, o := range found {
+		if _, err := tx.Exec(ctx,
+			`UPDATE orders SET status = 'cancelled', locked = 0 WHERE order_hash = $1`, o.hash); err != nil {
+			return 0, err
+		}
+		if err := releaseLock(ctx, tx, o.wallet, marketID, uint8(o.side), uint8(o.outcome), o.locked); err != nil {
+			return 0, err
+		}
+	}
+	return len(found), nil
+}
+
 func releaseLock(ctx context.Context, tx pgx.Tx, wallet string, marketID []byte, side, outcome uint8, locked int64) error {
 	if locked == 0 {
 		return nil
