@@ -7,6 +7,7 @@ import { kindOf } from "@/lib/kinds";
 import type { Market, Match, NewsItem } from "@/lib/types";
 import { TopBar } from "@/components/TopBar";
 import { FlagPair } from "@/components/TeamFlag";
+import { StarButton } from "@/components/StarButton";
 import { FeaturedHero } from "@/components/FeaturedHero";
 import { BreakingNews } from "@/components/BreakingNews";
 import { usePitchWallet } from "@/lib/wallet";
@@ -160,7 +161,10 @@ function MatchSection({ match, markets }: { match: Match; markets: Market[] }) {
               <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
                 {kindOf(m)}
               </span>
-              <PrecisionState market={m} />
+              <span className="flex items-center gap-2">
+                <StarButton marketId={m.market_id} />
+                <PrecisionState market={m} />
+              </span>
             </div>
           </Link>
         ))}
@@ -201,6 +205,7 @@ function BinaryCard({ m, match }: { m: Market; match: Match }) {
             {kindOf(m)}
           </span>
           <div className="flex shrink-0 items-center gap-1.5">
+            <StarButton marketId={m.market_id} />
             <Link href={`/market/${m.market_id}?o=yes`} className={yesBtn}>
               Yes
             </Link>
@@ -224,7 +229,10 @@ function BinaryCard({ m, match }: { m: Market; match: Match }) {
         <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
           {kindOf(m)}
         </span>
-        <MarketState market={m} />
+        <span className="flex items-center gap-2">
+          <StarButton marketId={m.market_id} />
+          <MarketState market={m} />
+        </span>
       </div>
     </Link>
   );

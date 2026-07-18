@@ -90,8 +90,16 @@ resolve_combo(quote_hash)                            → reads N leg Market PDAs
 ## 5. Off-chain surface (E2 owns; frontend contract)
 REST: `POST /orders` (submit signed Order), `DELETE /orders/:hash`, `GET /markets/:id/book`,
 `POST /combos` (RFQ), `POST /combos/:id/accept`, `POST /markets/:id/precision`,
-`GET /portfolio`, `POST /wallet/deposit`. WS `/ws`: `book_update`, `fill`, `order_update`,
+`GET /portfolio`, `POST /wallet/deposit`, `GET /watchlist`, `POST /watchlist`,
+`DELETE /watchlist/:market_id`. WS `/ws`: `book_update`, `fill`, `order_update`,
 `combo_quote`, `match_state`, `oneliner`. (Full list in regenerated PROJECT_PLAN.md.)
+
+### 5.1 Watchlist routes
+- `GET /watchlist?wallet=` → `{ market_ids: string[] }` — 64-hex market ids, newest-first.
+- `POST /watchlist` body `{ wallet, market_id }` → `{ ok: true }` — favourites a market.
+- `DELETE /watchlist/{market_id}?wallet=` → `{ ok: true }` — unfavourites a market.
+
+`wallet` is base58; `market_id` is 64-char hex. Unknown `market_id` on `POST` → 400.
 
 ---
 

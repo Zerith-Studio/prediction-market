@@ -55,6 +55,12 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function del(path: string): Promise<void> {
+  if (!BASE) throw new ApiError(0, "NEXT_PUBLIC_API_URL is not configured");
+  const res = await fetch(`${BASE}${path}`, { method: "DELETE" });
+  if (!res.ok) throw new ApiError(res.status, await safeText(res));
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -499,6 +505,22 @@ export const api = {
         resolve_tx: c.resolve_tx,
       })),
     }));
+  },
+
+  async getWatchlist(wallet: string | null): Promise<string[]> {
+    if (!wallet) return [];
+    return get<string[], { market_ids: string[] | null }>(
+      `/watchlist?wallet=${encodeURIComponent(wallet)}`,
+      (w) => w.market_ids ?? []
+    );
+  },
+
+  async addWatch(wallet: string, marketId: string): Promise<void> {
+    await post<{ ok: boolean }>(`/watchlist`, { wallet, market_id: marketId });
+  },
+
+  async removeWatch(wallet: string, marketId: string): Promise<void> {
+    await del(`/watchlist/${marketId}?wallet=${encodeURIComponent(wallet)}`);
   },
 
   /** Submit a signed order. Throws ApiError: 401 bad sig, 402 funds, 409 replay. */

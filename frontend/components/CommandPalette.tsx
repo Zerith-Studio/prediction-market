@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, configured } from "@/lib/api";
 import { kindOf } from "@/lib/kinds";
+import { useWatchlist } from "@/lib/watchlist";
 import type { Market, Match } from "@/lib/types";
 
 interface Result {
@@ -24,6 +25,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const { isWatched } = useWatchlist();
 
   useEffect(() => {
     if (!open) return;
@@ -89,13 +91,20 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       // Precision pools have their own page; everything else is /market/[id].
       href: m.type === "precision" ? `/precision/${m.market_id}` : `/market/${m.market_id}`,
     });
+    const all = markets.filter(hit);
+    const watch = all.filter((m) => isWatched(m.market_id)).map(toResult);
+    const rest = all.filter((m) => !isWatched(m.market_id));
     return {
-      binary: markets.filter((m) => m.type === "binary" && hit(m)).map(toResult),
-      precision: markets.filter((m) => m.type === "precision" && hit(m)).map(toResult),
+      watch,
+      binary: rest.filter((m) => m.type === "binary").map(toResult),
+      precision: rest.filter((m) => m.type === "precision").map(toResult),
     };
-  }, [markets, matchById, query]);
+  }, [markets, matchById, query, isWatched]);
 
-  const flat = useMemo(() => [...results.binary, ...results.precision], [results]);
+  const flat = useMemo(
+    () => [...results.watch, ...results.binary, ...results.precision],
+    [results]
+  );
   const sel = Math.min(selected, Math.max(flat.length - 1, 0));
 
   useEffect(() => setSelected(0), [query]);
@@ -183,9 +192,17 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           {!loading && !error && (
             <>
               <Group
+                label="Watchlist"
+                items={results.watch}
+                startIdx={0}
+                sel={sel}
+                setSelected={setSelected}
+                go={go}
+              />
+              <Group
                 label="Markets"
                 items={results.binary}
-                startIdx={0}
+                startIdx={results.watch.length}
                 sel={sel}
                 setSelected={setSelected}
                 go={go}
@@ -193,7 +210,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
               <Group
                 label="Precision"
                 items={results.precision}
-                startIdx={results.binary.length}
+                startIdx={results.watch.length + results.binary.length}
                 sel={sel}
                 setSelected={setSelected}
                 go={go}
