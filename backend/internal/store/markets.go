@@ -162,7 +162,7 @@ func (s *Store) CreateMarket(ctx context.Context, marketID [32]byte, matchID, te
 	return err
 }
 
-const marketColumns = `id, market_id, match_id, template_key, type, title, rule, status,
+const marketColumns = `id, market_id, COALESCE(match_id::text, ''), template_key, type, title, rule, status,
 	COALESCE(outcome, 'null'::jsonb), COALESCE(chain_tx, ''), created_at, featured_rank`
 
 func scanMarket(row pgx.Row) (MarketRow, error) {
@@ -184,10 +184,14 @@ func (s *Store) GetMarket(ctx context.Context, marketID [32]byte) (MarketRow, er
 
 // ListMarkets returns markets, optionally filtered by status ("" = all).
 func (s *Store) ListMarkets(ctx context.Context, status string) ([]MarketRow, error) {
-	q := `SELECT ` + marketColumns + ` FROM markets`
+	// match_id IS NOT NULL: tournament-wide markets (no single match) can exist in
+	// the DB but the match-centric UI can't render them — exclude rather than 500
+	// the whole list. COALESCE in marketColumns is the belt-and-suspenders so any
+	// other market read (e.g. GetMarket) also survives a NULL match_id.
+	q := `SELECT ` + marketColumns + ` FROM markets WHERE match_id IS NOT NULL`
 	args := []any{}
 	if status != "" {
-		q += ` WHERE status = $1`
+		q += ` AND status = $1`
 		args = append(args, status)
 	}
 	q += ` ORDER BY featured_rank NULLS LAST, created_at`
