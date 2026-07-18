@@ -128,6 +128,182 @@ func TestMatchLineupsAndLiveState(t *testing.T) {
 	}
 }
 
+// TestBreakingNewsAndFeatured proves the featured_rank pin round-trip and the
+// breaking_news insert / PrevYesPct / LatestBreakingNews path against a real DB.
+func TestBreakingNewsAndFeatured(t *testing.T) {
+	s := storetest.Open(t)
+	matchID, err := s.UpsertMatch(ctx, "fx-news", "Spain", "Argentina", time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("UpsertMatch: %v", err)
+	}
+	var mid [32]byte
+	mid[0], mid[31] = 7, 0xFF
+	if err := s.CreateMarket(ctx, mid, matchID, "dnb_home", "binary", "Spain to win", "Settles YES if Spain win"); err != nil {
+		t.Fatalf("CreateMarket: %v", err)
+	}
+
+	// featured_rank: fresh = unpinned; pin → 3; unpin → nil.
+	m, _ := s.GetMarket(ctx, mid)
+	if m.FeaturedRank != nil {
+		t.Fatalf("fresh market pinned: %v", *m.FeaturedRank)
+	}
+	rank := 3
+	if err := s.SetMarketFeatured(ctx, mid, &rank); err != nil {
+		t.Fatalf("SetMarketFeatured: %v", err)
+	}
+	if m, _ = s.GetMarket(ctx, mid); m.FeaturedRank == nil || *m.FeaturedRank != 3 {
+		t.Fatalf("pin not stored: %v", m.FeaturedRank)
+	}
+	if err := s.SetMarketFeatured(ctx, mid, nil); err != nil {
+		t.Fatalf("unpin: %v", err)
+	}
+	if m, _ = s.GetMarket(ctx, mid); m.FeaturedRank != nil {
+		t.Fatalf("unpin failed: %v", *m.FeaturedRank)
+	}
+
+	// breaking_news: no prior yes_pct → nil baseline.
+	if s.PrevYesPct(ctx, mid) != nil {
+		t.Error("expected no prior yes_pct")
+	}
+	yes1, pub := 54, time.Now().Add(-2*time.Hour)
+	if err := s.InsertBreakingNews(ctx, store.NewsInput{
+		MatchID: matchID, MarketID: mid, Headline: "Spain XI confirmed",
+		Summary: "Yamal starts.", Source: "goal.com", URL: "https://goal.com/x",
+		PublishedAt: &pub, YesPct: &yes1,
+	}); err != nil {
+		t.Fatalf("InsertBreakingNews: %v", err)
+	}
+	if prev := s.PrevYesPct(ctx, mid); prev == nil || *prev != 54 {
+		t.Fatalf("PrevYesPct: %v", prev)
+	}
+
+	rows, err := s.LatestBreakingNews(ctx, 6*time.Hour, 12)
+	if err != nil {
+		t.Fatalf("LatestBreakingNews: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("want 1 row, got %d", len(rows))
+	}
+	if r := rows[0]; r.Home != "Spain" || r.Away != "Argentina" || r.Question != "Spain to win" ||
+		r.Headline != "Spain XI confirmed" || r.Source != "goal.com" || r.YesPct == nil || *r.YesPct != 54 {
+		t.Fatalf("news row: %+v", rows[0])
+	}
+
+	// A newer row for the same market supersedes it (DISTINCT ON market_id).
+	yes2, d := 58, 4
+	if err := s.InsertBreakingNews(ctx, store.NewsInput{
+		MatchID: matchID, MarketID: mid, Headline: "Injury latest",
+		URL: "https://goal.com/y", YesPct: &yes2, Delta: &d,
+	}); err != nil {
+		t.Fatalf("InsertBreakingNews 2: %v", err)
+	}
+	rows, _ = s.LatestBreakingNews(ctx, 6*time.Hour, 12)
+	if len(rows) != 1 || rows[0].Headline != "Injury latest" || rows[0].Delta == nil || *rows[0].Delta != 4 {
+		t.Fatalf("newest row should win: %+v", rows)
+	}
+}
+
+// TestComments exercises the comment thread: insert + reply, cross-market reply
+// rejection, like toggle + counts + viewer flag, soft-delete blanking, and the
+// rate-limit count — all against a real DB.
+func TestComments(t *testing.T) {
+	s := storetest.Open(t)
+	var mid [32]byte
+	mid[0], mid[31] = 9, 0xFF
+	seedMarket(t, s, mid)
+	w1, w2 := "walletAliceAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "walletBobBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+
+	top, err := s.InsertComment(ctx, mid, nil, w1, "Spain looking strong")
+	if err != nil {
+		t.Fatalf("InsertComment top: %v", err)
+	}
+	if top.ParentID != nil || top.Wallet != w1 || top.Body != "Spain looking strong" || top.Deleted {
+		t.Fatalf("top: %+v", top)
+	}
+	reply, err := s.InsertComment(ctx, mid, &top.ID, w2, "nah, Argentina by 2")
+	if err != nil {
+		t.Fatalf("InsertComment reply: %v", err)
+	}
+	if reply.ParentID == nil || *reply.ParentID != top.ID {
+		t.Fatalf("reply parent: %+v", reply)
+	}
+
+	// A reply whose parent belongs to a different market is rejected.
+	var other [32]byte
+	other[0], other[31] = 8, 0xFF
+	seedMarket(t, s, other)
+	if _, err := s.InsertComment(ctx, other, &top.ID, w1, "cross-market"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("cross-market reply should be ErrNotFound, got %v", err)
+	}
+
+	// Likes: w1 like → 1, w2 like → 2, w1 unlike → 1.
+	if liked, count, err := s.ToggleLike(ctx, top.ID, w1); err != nil || !liked || count != 1 {
+		t.Fatalf("w1 like: %v %d %v", liked, count, err)
+	}
+	if _, count, _ := s.ToggleLike(ctx, top.ID, w2); count != 2 {
+		t.Fatalf("count after w2 like: %d", count)
+	}
+	if liked, count, _ := s.ToggleLike(ctx, top.ID, w1); liked || count != 1 {
+		t.Fatalf("w1 unlike: liked=%v count=%d", liked, count)
+	}
+
+	// List for viewer w2: top has 1 like and w2 liked it.
+	rows, err := s.ListComments(ctx, mid, w2, 100)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("ListComments: %v (n=%d)", err, len(rows))
+	}
+	var topRow store.CommentRow
+	for _, r := range rows {
+		if r.ID == top.ID {
+			topRow = r
+		}
+	}
+	if topRow.LikeCount != 1 || !topRow.Liked {
+		t.Fatalf("top row like state: %+v", topRow)
+	}
+
+	// Soft-delete the reply → body blanked, marked deleted; re-delete → ErrNotFound.
+	if mhex, err := s.SoftDeleteComment(ctx, reply.ID); err != nil || mhex == "" {
+		t.Fatalf("SoftDelete: %v %q", err, mhex)
+	}
+	rows, _ = s.ListComments(ctx, mid, "", 100)
+	for _, r := range rows {
+		if r.ID == reply.ID && (!r.Deleted || r.Body != "") {
+			t.Fatalf("deleted reply not blanked: %+v", r)
+		}
+	}
+	if _, err := s.SoftDeleteComment(ctx, reply.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("re-delete should be ErrNotFound, got %v", err)
+	}
+
+	// Author edit: only the author (w1) can edit their top comment.
+	if _, err := s.EditComment(ctx, top.ID, w2, "hijack"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("non-author edit should be ErrNotFound, got %v", err)
+	}
+	if _, err := s.EditComment(ctx, top.ID, w1, "Spain by 1 (edited)"); err != nil {
+		t.Fatalf("author edit: %v", err)
+	}
+	rows, _ = s.ListComments(ctx, mid, "", 100)
+	for _, r := range rows {
+		if r.ID == top.ID && (r.Body != "Spain by 1 (edited)" || !r.Edited) {
+			t.Fatalf("edit not reflected: %+v", r)
+		}
+	}
+
+	// Author self-delete: non-author rejected, author succeeds.
+	if _, err := s.DeleteOwnComment(ctx, top.ID, w2); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("non-author delete should be ErrNotFound, got %v", err)
+	}
+	if _, err := s.DeleteOwnComment(ctx, top.ID, w1); err != nil {
+		t.Fatalf("author self-delete: %v", err)
+	}
+
+	// Rate-limit backstop: w1 posted exactly one comment (the cross-market insert failed).
+	if n, err := s.RecentCommentCount(ctx, w1, time.Now().Add(-time.Hour)); err != nil || n != 1 {
+		t.Fatalf("RecentCommentCount w1: %d %v", n, err)
+	}
+}
+
 func TestPlaceOrderLocksAndRejects(t *testing.T) {
 	s := storetest.Open(t)
 	var marketID [32]byte

@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS markets (
     chain_tx        TEXT, -- resolve_market tx sig
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Admin "pin" for the featured hero on the markets index. NULL = not pinned;
+-- lower rank = higher priority. Added post-hoc; safe on existing DBs.
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS featured_rank INTEGER;
 
 -- Demo mirror of vault USDC balances (micro-USDC). The vault-owned ATAs on chain
 -- are authoritative; usdc_locked is the E2 soft-lock (UX only, interface-contract §6.2).
@@ -151,5 +154,55 @@ CREATE TABLE IF NOT EXISTS oneliners (
     PRIMARY KEY (market_id, generated_at)
 );
 
+-- Hourly breaking-news, one row per match per generation: a REAL Exa article
+-- (headline/source/url/published_at) tied to a representative market, with a
+-- Yes% snapshot + momentum delta from real odds. Never fabricated.
+CREATE TABLE IF NOT EXISTS breaking_news (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    match_id      UUID NOT NULL REFERENCES matches(id),
+    market_id     BYTEA NOT NULL REFERENCES markets(market_id),
+    headline      TEXT NOT NULL,          -- real Exa article title
+    summary       TEXT,                   -- optional Gemini one-sentence condense (grounded)
+    source        TEXT,                   -- source domain (e.g. goal.com)
+    url           TEXT NOT NULL,          -- real article URL
+    published_at  TIMESTAMPTZ,            -- article publish time
+    yes_pct       INTEGER,                -- market Yes% at generation
+    delta         INTEGER,                -- yes_pct change vs the previous snapshot
+    generated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS breaking_news_gen_idx ON breaking_news (generated_at DESC);
+CREATE INDEX IF NOT EXISTS breaking_news_market_idx ON breaking_news (market_id, generated_at DESC);
+
+-- Per-market comment threads. wallet is the base58 poster (client-claimed —
+-- comments are unsigned, unlike orders). parent_id (nullable) = a reply.
+-- deleted_at soft-deletes so replies keep their thread structure.
+CREATE TABLE IF NOT EXISTS comments (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    market_id   BYTEA NOT NULL REFERENCES markets(market_id),
+    parent_id   UUID REFERENCES comments(id),
+    wallet      TEXT NOT NULL, -- base58 Solana pubkey (claimed identity)
+    body        TEXT NOT NULL,
+    deleted_at  TIMESTAMPTZ,
+    edited_at   TIMESTAMPTZ,   -- set when the author edits (shows "(edited)")
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS comments_market_idx ON comments (market_id, created_at);
+CREATE INDEX IF NOT EXISTS comments_wallet_idx ON comments (wallet, created_at DESC);
+
+-- One like per (comment, wallet); toggled by insert/delete.
+CREATE TABLE IF NOT EXISTS comment_likes (
+    comment_id  UUID NOT NULL REFERENCES comments(id),
+    wallet      TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (comment_id, wallet)
+);
+CREATE INDEX IF NOT EXISTS comment_likes_comment_idx ON comment_likes (comment_id);
+
 -- post-hoc migrations (idempotent) — columns added after first bootstrap
 ALTER TABLE positions_cache ADD COLUMN IF NOT EXISTS realized BIGINT NOT NULL DEFAULT 0;
+-- Per-user avatar seed (deterministic gradient, @outpacelabs/avatars). Defaults
+-- to the wallet; kept as a column so it can be customized later.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_seed TEXT;
+UPDATE users SET avatar_seed = wallet WHERE avatar_seed IS NULL;
+-- comments existed before author-edit; add edited_at on existing DBs.
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;

@@ -41,6 +41,7 @@ type MarketRow struct {
 	Outcome     []byte    `json:"outcome,omitempty"` // raw JSONB
 	ChainTx     string    `json:"chain_tx,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
+	FeaturedRank *int     `json:"featured_rank,omitempty"` // nil = not pinned; lower = higher priority
 }
 
 // UpsertMatch registers a fixture (feed-driven auto market creation, PROJECT_PLAN §3).
@@ -162,13 +163,13 @@ func (s *Store) CreateMarket(ctx context.Context, marketID [32]byte, matchID, te
 }
 
 const marketColumns = `id, market_id, match_id, template_key, type, title, rule, status,
-	COALESCE(outcome, 'null'::jsonb), COALESCE(chain_tx, ''), created_at`
+	COALESCE(outcome, 'null'::jsonb), COALESCE(chain_tx, ''), created_at, featured_rank`
 
 func scanMarket(row pgx.Row) (MarketRow, error) {
 	var m MarketRow
 	var marketID []byte
 	err := row.Scan(&m.ID, &marketID, &m.MatchID, &m.TemplateKey, &m.Type, &m.Title,
-		&m.Rule, &m.Status, &m.Outcome, &m.ChainTx, &m.CreatedAt)
+		&m.Rule, &m.Status, &m.Outcome, &m.ChainTx, &m.CreatedAt, &m.FeaturedRank)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return m, ErrNotFound
 	}
@@ -189,7 +190,7 @@ func (s *Store) ListMarkets(ctx context.Context, status string) ([]MarketRow, er
 		q += ` WHERE status = $1`
 		args = append(args, status)
 	}
-	q += ` ORDER BY created_at`
+	q += ` ORDER BY featured_rank NULLS LAST, created_at`
 	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -228,6 +229,20 @@ func (s *Store) MarketsForMatch(ctx context.Context, matchID string) ([]MarketRo
 func (s *Store) SetMarketStatus(ctx context.Context, marketID [32]byte, status string) error {
 	res, err := s.pool.Exec(ctx,
 		`UPDATE markets SET status = $2 WHERE market_id = $1`, marketID[:], status)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetMarketFeatured pins (rank != nil) or unpins (rank == nil) a market for the
+// featured hero on the markets index. Lower rank = higher priority.
+func (s *Store) SetMarketFeatured(ctx context.Context, marketID [32]byte, rank *int) error {
+	res, err := s.pool.Exec(ctx,
+		`UPDATE markets SET featured_rank = $2 WHERE market_id = $1`, marketID[:], rank)
 	if err != nil {
 		return err
 	}
