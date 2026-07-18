@@ -16,9 +16,11 @@ import { calcPosition, usePositionActions } from "@/lib/usePositionActions";
 
 export function MarketPositions({
   marketId,
+  resolvedOutcome = null,
   refreshKey = 0,
 }: {
   marketId: string;
+  resolvedOutcome?: "YES" | "NO" | "VOID" | null; // set once the market resolves
   refreshKey?: number;
 }) {
   const wallet = usePitchWallet();
@@ -38,7 +40,7 @@ export function MarketPositions({
     return () => clearInterval(t);
   }, [load, refreshKey]);
 
-  const { exit, cancel, busy, error } = usePositionActions(load);
+  const { exit, cancel, claim, busy, error } = usePositionActions(load);
 
   if (!wallet.address) return null;
 
@@ -67,6 +69,13 @@ export function MarketPositions({
         <div className="mb-1">
           {positions.map((x) => {
             const up = x.unrealizedMicro >= 0;
+            const won = resolvedOutcome === "VOID" || resolvedOutcome === x.side;
+            const lost = !!resolvedOutcome && !won;
+            const claimMicro =
+              resolvedOutcome === "VOID" ? x.qty * x.entry * 10_000 : x.qty * 1_000_000;
+            // the resting SELL order covering this position → one-click cancel-exit
+            const exitOrder = orders.find((o) => o.side === "sell" && o.outcome === x.side);
+            const fullyLocked = x.available <= 0 && x.locked > 0 && !!exitOrder;
             return (
               <div
                 key={`${x.p.market_id}-${x.side}`}
@@ -75,7 +84,9 @@ export function MarketPositions({
                 <div className="min-w-0">
                   <div className="font-mono text-[13px] text-ink tnum">
                     {fmtShares(x.qty)} {x.side}
-                    {x.locked > 0 && (
+                    {won && <span className="ml-2 text-[11px] text-accent">· won</span>}
+                    {lost && <span className="ml-2 text-[11px] text-dim">· lost</span>}
+                    {!resolvedOutcome && x.locked > 0 && (
                       <span className="ml-2 text-[11px] text-dim">
                         · {fmtShares(x.locked)} in exit
                       </span>
@@ -89,20 +100,38 @@ export function MarketPositions({
                     </span>
                   </div>
                 </div>
-                <button
-                  onClick={() => exit(x)}
-                  disabled={busy === x.p.market_id || x.cur <= 0 || x.available <= 0}
-                  title={
-                    x.available <= 0
-                      ? "All shares are resting in an exit order — cancel it to re-exit"
-                      : x.cur <= 0
-                        ? "No bid to exit into"
-                        : `Sell ${fmtShares(x.available)} @ ${x.cur}¢`
-                  }
-                  className="shrink-0 border border-line2 px-3 py-1.5 font-mono text-[12px] text-muted transition-colors hover:border-dim hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 enabled:active:scale-[0.97]"
-                >
-                  {busy === x.p.market_id ? "exiting…" : "exit"}
-                </button>
+                {won ? (
+                  <button
+                    onClick={() => claim(x.p.market_id)}
+                    disabled={busy === x.p.market_id}
+                    title="Redeem your winning shares for USDC — signs in your wallet"
+                    className="shrink-0 border border-accent px-3 py-1.5 font-mono text-[12px] text-accent transition-[transform,filter] duration-150 hover:brightness-125 disabled:opacity-40 enabled:active:scale-[0.97]"
+                  >
+                    {busy === x.p.market_id ? "claiming…" : `claim ${usd(claimMicro)}`}
+                  </button>
+                ) : lost ? (
+                  <span className="shrink-0 font-mono text-[12px] text-dim">—</span>
+                ) : fullyLocked ? (
+                  <button
+                    onClick={() => cancel(exitOrder!.order_hash)}
+                    disabled={busy === exitOrder!.order_hash}
+                    title="Cancel the resting exit order to free your shares"
+                    className="shrink-0 border border-line2 px-3 py-1.5 font-mono text-[12px] text-muted transition-colors hover:border-down hover:text-down disabled:cursor-not-allowed disabled:opacity-40 enabled:active:scale-[0.97]"
+                  >
+                    {busy === exitOrder!.order_hash ? "cancelling…" : "cancel exit"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => exit(x)}
+                    disabled={busy === x.p.market_id || x.cur <= 0 || x.available <= 0}
+                    title={
+                      x.cur <= 0 ? "No bid to exit into" : `Sell ${fmtShares(x.available)} @ ${x.cur}¢`
+                    }
+                    className="shrink-0 border border-line2 px-3 py-1.5 font-mono text-[12px] text-muted transition-colors hover:border-dim hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 enabled:active:scale-[0.97]"
+                  >
+                    {busy === x.p.market_id ? "exiting…" : "exit"}
+                  </button>
+                )}
               </div>
             );
           })}

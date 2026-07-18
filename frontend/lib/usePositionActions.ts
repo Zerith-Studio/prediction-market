@@ -107,5 +107,29 @@ export function usePositionActions(onDone: () => void) {
     [wallet, busy, onDone]
   );
 
-  return { exit, cancel, busy, error };
+  // Claim winnings on a resolved binary market: user-signed on-chain redeem
+  // (burn winning shares → USDC to their wallet), then the mirror follows.
+  const claim = useCallback(
+    async (marketId: string) => {
+      if (!wallet.address || busy) return;
+      setError(null);
+      setBusy(marketId);
+      try {
+        const init = await api.redeemInit(wallet.address, marketId);
+        const msg = Uint8Array.from(atob(init.message_b64), (c) => c.charCodeAt(0));
+        const sig = await wallet.signMessage(msg);
+        const res = await api.redeemComplete(init.redeem_id, wallet.address, marketId, toHex(sig));
+        notify.claimed(res.amount);
+        onDone();
+      } catch (e) {
+        notify.error(e, "Claim failed");
+        setError(e instanceof Error ? e.message : "claim failed");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [wallet, busy, onDone]
+  );
+
+  return { exit, cancel, claim, busy, error };
 }

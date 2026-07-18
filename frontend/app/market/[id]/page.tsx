@@ -116,7 +116,15 @@ export default function MarketPage({
                         setPosRefresh((n) => n + 1);
                       }}
                     />
-                    <MarketPositions marketId={params.id} refreshKey={posRefresh} />
+                    <MarketPositions
+                      marketId={params.id}
+                      resolvedOutcome={
+                        m.market.outcome?.void
+                          ? "VOID"
+                          : (m.market.outcome?.winner ?? null)
+                      }
+                      refreshKey={posRefresh}
+                    />
                   </div>
                 </div>
               </div>
