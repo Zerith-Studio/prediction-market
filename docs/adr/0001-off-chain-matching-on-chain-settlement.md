@@ -13,9 +13,9 @@ on-chain is high-risk to build in a hackathon. Judges care that outcomes/payouts
 ## Decision
 - Matching engine, order book, balances, positions, precision pools, and RFQ state are
   **off-chain** (Go + Postgres).
-- Solana is used at **settlement only**: a devnet Anchor program (the *Resolution
-  Registry*) records `(market_id, outcome, payout_merkle_root)` so results are
-  independently verifiable.
+- Solana is used at **settlement only**: a devnet Anchor program records each market's
+  `(market_id, outcome)` via `resolve_market`, and settles/redeems positions on-chain
+  (per-match `settle_match`, then `redeem`), so results are independently verifiable.
 - **No on-chain order book.**
 - Custody is an off-chain demo ledger; a trustless escrow-vault path is designed but
   optional (Tier 2).
@@ -23,6 +23,6 @@ on-chain is high-risk to build in a hackathon. Judges care that outcomes/payouts
 ## Consequences
 - (+) Fast, familiar trading UX; small, low-risk on-chain surface; clear settlement story.
 - (−) Trust model is operator-custodial until the escrow vault ships. Must be stated
-  honestly in README/demo. The merkle root proves *what was decided*, not that custody
-  is trustless. ← this trust boundary is being grilled (see open questions).
+  honestly in README/demo. Recording the outcome on-chain proves *what was decided*, not
+  that custody is trustless. ← this trust boundary is being grilled (see open questions).
 - (−) A single `resolver_authority` key is a centralization point. ← under grilling.
