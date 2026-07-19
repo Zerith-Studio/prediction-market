@@ -6,10 +6,11 @@ import { Check, Loader2 } from "lucide-react";
 import bs58 from "bs58";
 import type { MarketStatus, Side } from "@/lib/types";
 import { buyCostMicro, maxPayoutMicro, usd } from "@/lib/format";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, explorerTx } from "@/lib/api";
 import { borshOrder, fromHex, randomSalt, toHex } from "@/lib/borsh";
 import { usePitchWallet } from "@/lib/wallet";
 import { notify } from "@/lib/toast";
+import { VerifyLink } from "@/components/VerifyLink";
 
 type SubmitState = "idle" | "signing" | "placed";
 
@@ -42,10 +43,39 @@ export function TradePanel({
   const [serverError, setServerError] = useState<string | null>(null);
   const [touchedPrice, setTouchedPrice] = useState(false);
   const [funding, setFunding] = useState(false);
+  // The on-chain resolve tx that closed the market — the TxLINE/TxODDS-driven
+  // resolve_market signature. Fetched lazily, only once the market is closed.
+  // undefined = not fetched yet, null = fetched but no settle tx on-chain yet.
+  const [settleTx, setSettleTx] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
     if (!touchedPrice) setPrice(String(outcomePrice));
   }, [outcomePrice, touchedPrice]);
+
+  // Surface the settlement proof once the market is no longer open. Fetch the
+  // resolution info lazily (never for a live/open market) and pull the resolve
+  // tx out of its timeline; degrade to null when no tx is available yet.
+  useEffect(() => {
+    if (marketStatus === "open") {
+      setSettleTx(undefined);
+      return;
+    }
+    let alive = true;
+    api
+      .getSettlement(marketId)
+      .then((s) => {
+        if (!alive) return;
+        // The resolve step specifically — NOT any tx in the timeline (the
+        // program-deploy step always carries a tx, which isn't this market's
+        // settlement). Null when the resolve tx isn't on-chain yet.
+        const resolve = s.timeline.find((t) => /resolve_market/i.test(t.detail));
+        setSettleTx(resolve?.tx ?? null);
+      })
+      .catch(() => alive && setSettleTx(null));
+    return () => {
+      alive = false;
+    };
+  }, [marketStatus, marketId]);
 
   // Switching YES↔NO resnaps the limit price to that outcome's quote.
   function selectOutcome(o: 0 | 1) {
@@ -351,6 +381,21 @@ export function TradePanel({
             ? "Demo wallet (local key) — orders sign and settle on the real exchange."
             : "Order signed in your wallet. Gasless — settled on-chain by the crank."}
       </p>
+
+      {/* Once the market is closed/settled, surface the TxLINE/TxODDS-driven
+          on-chain resolve tx so anyone can verify the settlement themselves.
+          Only rendered when a real signature is available. */}
+      {locked && settleTx && (
+        <div className="mt-3 rule-t pt-4">
+          <div className="mb-1.5 eyebrow">On-chain settlement</div>
+          <p className="mb-2 font-mono text-[11px] leading-relaxed text-dim">
+            Resolved on Solana from the TxLINE/TxODDS match result — the{" "}
+            <code className="text-muted">resolve_market</code> transaction that
+            closed this market.
+          </p>
+          <VerifyLink href={explorerTx(settleTx)}>Verify on Solana explorer</VerifyLink>
+        </div>
+      )}
     </div>
   );
 }

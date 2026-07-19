@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, configured, mapBook, mapMatch, wsUrl, type WireBook } from "./api";
+import { api, ApiError, configured, mapBook, wsUrl, type WireBook } from "./api";
+import { applyMatchState, matchConcluded, reconcileMatchStatus } from "./matchState";
 import type { Book, Fill, Lineups, Market, Match, TeamMatchStats } from "./types";
 
 // The score-tick shape carried by a match_state WS event's payload (mirrors the
@@ -25,6 +26,9 @@ export interface LiveMarket {
   errorStatus: number | null;
   market: Market | null;
   match: Match | null;
+  // true once every binary market on this fixture has resolved — the match is
+  // over even if a stale feed status still says "live" (see matchConcluded).
+  concluded: boolean;
   book: Book | null;
   fills: Fill[];
   history: PricePoint[];
@@ -125,6 +129,7 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
     errorStatus: null,
     market: null,
     match: null,
+    concluded: false,
     book: null,
     fills: [],
     history: [],
@@ -166,14 +171,22 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
           live_state: {},
           lineups: null,
         };
-        const [match, book, fills, oneliners, balanceMicro] = await Promise.all([
+        const [rawMatch, book, fills, oneliners, balanceMicro, siblings] = await Promise.all([
           market.match_id ? api.getMatch(market.match_id) : Promise.resolve(syntheticMatch),
           api.getBook(marketId),
           api.getFills(marketId),
           api.getOneliners(marketId),
           api.getBalance(wallet),
+          // The fixture's markets tell us if the match has actually finished —
+          // all of them resolved means the match is over, correcting a stale
+          // "live" the feed never cleared. Only needed for fixture markets.
+          market.match_id
+            ? api.listMarkets().then((all) => all.filter((m) => m.match_id === market.match_id))
+            : Promise.resolve([] as Market[]),
         ]);
         if (!alive) return;
+        const concluded = matchConcluded(siblings);
+        const match = reconcileMatchStatus(rawMatch, concluded);
         const mid = midOf(book, 50);
         const history = restoreHistory(marketId, fills, mid);
         setState((s) => ({
@@ -181,6 +194,7 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
           loading: false,
           market,
           match,
+          concluded,
           book,
           fills,
           oneliners,
@@ -207,7 +221,12 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
     let ws: WebSocket | null = null;
     let retry = 0;
 
-    const handle = (ev: { type: string; market_id?: string; data: unknown }) => {
+    const handle = (ev: {
+      type: string;
+      market_id?: string;
+      fixture_id?: string;
+      data: unknown;
+    }) => {
       switch (ev.type) {
         case "book_update": {
           if (ev.market_id !== marketId) return;
@@ -262,41 +281,19 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
           break;
         }
         case "match_state": {
-          const d = ev.data as { event?: string; payload?: ScoreTick | Lineups };
           setState((s) => {
             if (!s.match) return s;
-            // Team sheets arrive on their own match_state sub-event.
-            if (d.event === "lineup") {
-              return { ...s, match: { ...s.match, lineups: (d.payload as Lineups) ?? s.match.lineups } };
-            }
-            const finished = d.event === "full_time";
-            // Merge onto the last-known live_state so a sparse or partial tick
-            // (e.g. an early kickoff frame, or a stray odds re-broadcast) can
-            // never wipe the score or stats: keep the last good value for any
-            // field this update omits. prevLs is the already-mapped shape.
-            const prevLs = s.match.live_state;
-            const incoming = (d.payload ?? {}) as ScoreTick;
-            const mergedLs: ScoreTick = {
-              minute: incoming.minute ?? prevLs.minute,
-              period: incoming.period ?? prevLs.period,
-              home_goals: incoming.home_goals ?? prevLs.home_score,
-              away_goals: incoming.away_goals ?? prevLs.away_score,
-              possession: incoming.possession ?? prevLs.possession,
-              stats: incoming.stats ?? prevLs.stats,
-            };
-            return {
-              ...s,
-              match: mapMatch({
-                id: s.match.id,
-                fixture_id: s.match.fixture_id,
-                home: s.match.home,
-                away: s.match.away,
-                kickoff_at: s.match.kickoff_at,
-                status: finished ? "finished" : "live",
-                live_state: mergedLs,
-                lineups: s.match.lineups, // carry sheets across score ticks
+            // applyMatchState enforces the fixture guard and only lets real
+            // lifecycle transitions (kickoff/full_time) change status — so a
+            // stray odds/score tick can never fabricate a false "LIVE".
+            const next = reconcileMatchStatus(
+              applyMatchState(s.match, {
+                fixture_id: ev.fixture_id,
+                data: ev.data as { event?: string; payload?: ScoreTick | Lineups },
               }),
-            };
+              s.concluded
+            );
+            return next === s.match ? s : { ...s, match: next };
           });
           break;
         }
@@ -325,6 +322,28 @@ export function useLiveMarket(marketId: string, wallet: string | null = null): L
       ws?.close();
     };
   }, [marketId, state.loading, state.errorStatus]);
+
+  // Re-poll the authoritative match status/state on an interval so the header
+  // reflects reality on its own — scheduled → live → finished — even when no
+  // WS tick lands for this fixture while the page is open. The WS stream drives
+  // instant updates; this is the backstop that keeps status honest (and heals a
+  // stale status the moment the backend corrects it). Only fixture-backed
+  // markets have a match to refresh.
+  const matchId = state.market?.match_id;
+  useEffect(() => {
+    if (!configured() || state.loading || state.errorStatus || !matchId) return;
+    const t = setInterval(() => {
+      api
+        .getMatch(matchId)
+        .then((m) =>
+          setState((s) =>
+            s.match ? { ...s, match: reconcileMatchStatus(m, s.concluded) } : s
+          )
+        )
+        .catch(() => {});
+    }, 15_000);
+    return () => clearInterval(t);
+  }, [matchId, state.loading, state.errorStatus]);
 
   // persist the price series so a reload restores the graph the user was
   // watching (mid moves from resting orders never touch /fills, so this is the
