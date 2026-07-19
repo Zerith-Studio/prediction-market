@@ -41,8 +41,22 @@ export default function MarketsIndex() {
         setError(e instanceof Error ? e.message : "failed to load");
         setLoading(false);
       });
+    // Keep the matches/markets fresh so LIVE / SCHEDULED / FT badges reflect
+    // reality on their own as fixtures transition — the index has no WS, so
+    // without this poll the status a match had at page load would stick until a
+    // manual reload. Status-only refresh: never toggles the loading skeleton.
+    const poll = setInterval(() => {
+      Promise.all([api.listMatches(), api.listMarkets()])
+        .then(([ms, mks]) => {
+          if (!alive) return;
+          setMatches(ms);
+          setMarkets(mks);
+        })
+        .catch(() => {});
+    }, 15_000);
     return () => {
       alive = false;
+      clearInterval(poll);
     };
   }, [wallet.address]);
 
