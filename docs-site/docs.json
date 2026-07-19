@@ -29,7 +29,7 @@
       },
       {
         "group": "Reference",
-        "pages": ["reference/adrs", "reference/status"]
+        "pages": ["reference/adrs"]
       }
     ]
   },

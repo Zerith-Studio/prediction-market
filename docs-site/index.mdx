@@ -3,10 +3,9 @@ title: "PitchMarket"
 description: "A football prediction exchange on Solana — off-chain matching, on-chain non-custodial settlement."
 ---
 
-PitchMarket is a football prediction exchange built for the Superteam × TxODDS hackathon
-("Prediction Markets & Settlement" track). Users trade binary outcome markets on live
-World Cup fixtures priced from the TxLINE data feed. Matching is off-chain for speed;
-money moves on-chain, non-custodially, per cryptographically signed orders.
+PitchMarket is a football prediction exchange on Solana. Users trade binary outcome
+markets on live football fixtures priced from the TxLINE data feed. Matching is off-chain
+for speed; money moves on-chain, non-custodially, per cryptographically signed orders.
 
 ## The one-paragraph pitch
 
@@ -20,7 +19,7 @@ and redemption are on-chain on Solana devnet.
 
 <CardGroup cols={2}>
   <Card title="Architecture" icon="sitemap" href="/architecture">
-    How the Anchor program, Go backend, web frontend, and mobile app fit together.
+    How the on-chain program, backend service, web frontend, and mobile app fit together.
   </Card>
   <Card title="Matching engine" icon="arrows-left-right" href="/concepts/matching">
     The fully-collateralized CTF model and the three match types: NORMAL, MINT, MERGE.
@@ -41,22 +40,13 @@ and redemption are on-chain on Solana devnet.
 | **Combos (RFQ)** | Parlays: taker holds "all N legs win", an MM quotes the other side | Off-chain in the current build, behind an interface seam; the on-chain `combo_accept`/`resolve_combo` path is designed (ADR 0004) but stubbed |
 | **Precision pools** | Guess a match stat exactly; pool-based, winners paid by losers, σ-normalized closeness score | Off-chain (Tier 2 by design, ADR 0006) |
 
-## Current status
+## The trustless floor
 
-The trustless floor is **done and proven on devnet**: the program is deployed at the
-pinned ID `3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs`, and a full lifecycle — signed
-order → engine match → Go crank `settle_match` (v0 transaction + address lookup table) →
-`resolve_market` → 1:1 `redeem` — has run green with balance assertions
-(`go run ./cmd/devnet-e2e`).
+The core on-chain settlement path is deployed on Solana devnet at the pinned program ID
+`3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs`. A full lifecycle — signed order → engine
+match → operator crank `settle_match` (v0 transaction + address lookup table) →
+`resolve_market` → 1:1 `redeem` — runs end to end with balance assertions.
 
-Live status, verified-vs-unverified breakdown, and the changelog live in
-[`progress.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/progress.md)
-at the repo root — that file is the single source of truth for "what actually works
-today". See also [Status & verification](/reference/status).
-
-<Note>
-Everything in this site is derived from the repo's pinned documents:
-`docs/interface-contract.md` (the frozen E1↔E2 boundary), `docs/adr/0001–0007`,
-`docs/HANDOFF.md`, `PROJECT_PLAN.md`, and `progress.md`. Where those documents mark
-something unverified or unimplemented, this site says so rather than papering over it.
-</Note>
+Start with [Architecture](/architecture) for the system map, or jump to the
+[Matching engine](/concepts/matching) and [On-chain program](/onchain/program) for the
+mechanics.

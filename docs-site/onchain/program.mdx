@@ -31,23 +31,24 @@ on-chain, in Postgres, and in the API.
 
 ## Instructions
 
-Status marks follow `progress.md`: ✅ exercised (localnet integration tests, 8/8; core
-lifecycle also proven on devnet) · 🔴 typed stub returning `NotImplemented`.
+The settlement lifecycle — `initialize_market`, `deposit`, `settle_match`,
+`cancel_order`, `resolve_market`, and `redeem` — is implemented and exercised end to end.
+The combo instructions are typed stubs returning `NotImplemented` (see below).
 
-### `initialize_market(market_id, oracle_tier, resolver_authority)` ✅
+### `initialize_market(market_id, oracle_tier, resolver_authority)`
 
 Creates the Market PDA, both outcome mints (mint authority = the market PDA), and the
 collateral pool ATA. Called by the backend's auto market creation, one per template per
 fixture.
 
-### `init_vault()` / `deposit(amount)` ✅
+### `init_vault()` / `deposit(amount)`
 
 `init_vault` opens the per-user custody PDA (once per user). `deposit` moves real USDC
 from the user's wallet ATA into the vault-owned ATA — **the only step where the user
 signs a live transaction**; all trading afterwards is silent, off-chain-signed orders
 relayed by the operator. Deposit/redeem ATAs are created lazily via `init_if_needed`.
 
-### `settle_match(taker, taker_sig, maker, maker_sig, match_type, fill_price, fill_size)` ✅
+### `settle_match(taker, taker_sig, maker, maker_sig, match_type, fill_price, fill_size)`
 
 Settles one match from the off-chain engine. One transaction per fill (single taker,
 single maker). In order it:
@@ -70,26 +71,26 @@ MINT and MERGE move money at **each order's own limit price**, not `fill_price` 
 NORMAL uses `fill_price`. The Go store mirrors this exactly (`legDeltaFor`).
 </Warning>
 
-### `cancel_order(order_hash)` ✅
+### `cancel_order(order_hash)`
 
 Signed directly by the maker. Sets `is_filled_or_cancelled`; if the order was never
 touched by `settle_match`, `OrderStatus` is created fresh so a later fill attempt fails
 closed with `OrderClosed` regardless.
 
-### `resolve_market(outcome)` ✅ (tier-a only)
+### `resolve_market(outcome)` (tier-a only)
 
 Requires `oracle_tier == 0` and the signer to equal `resolver_authority`. Sets the
 outcome to `No (0)` / `Yes (1)` / `Void (2)` and stamps `resolved_at`. Tiers (b)
 challenge-window and (d) TxODDS-signed are designed (ADR 0005) but not implemented.
 
-### `redeem(outcome, amount)` ✅
+### `redeem(outcome, amount)`
 
 Requires the market resolved and `outcome` to be the winning side (any side if `Void`).
 Burns `amount` shares from the caller's vault-owned outcome ATA and transfers
 `amount × 1_000_000` micro-USDC from the market pool directly to the caller's wallet
 ATA, 1:1.
 
-### `combo_accept(quote, taker_sig)` 🔴 · `resolve_combo()` 🔴
+### `combo_accept(quote, taker_sig)` · `resolve_combo()` — not implemented
 
 Typed stubs returning `NotImplemented`. The designed semantics (ADR 0004 / interface
 contract §4): `combo_accept` verifies the MM's quote signature, expiry, and
