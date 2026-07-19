@@ -1,4 +1,4 @@
-import type { Lineups, Match, TeamMatchStats } from "./types";
+import type { Lineups, MarketStatus, Match, TeamMatchStats } from "./types";
 
 // The score-tick shape carried by a match_state WS event's payload (mirrors the
 // backend scorePayload); a "lineup" sub-event instead carries a Lineups object.
@@ -69,4 +69,30 @@ export function applyMatchState(match: Match, ev: MatchStateEvent): Match {
     // team sheets carry across score ticks
     lineups: match.lineups,
   };
+}
+
+/**
+ * A fixture-backed match is over once EVERY one of its binary markets has
+ * resolved (settled or void). Market resolutions come from the on-chain
+ * settlement, so they're authoritative — if they're all in, the match has
+ * finished, whatever a stale feed status still claims. Match-wide on purpose:
+ * during a live match only the half-time (1H) markets are settled, so this
+ * stays false until full time and never mislabels a genuinely live match.
+ */
+export function matchConcluded(
+  markets: { type: "binary" | "precision"; status: MarketStatus }[]
+): boolean {
+  const binaries = markets.filter((m) => m.type === "binary");
+  return (
+    binaries.length > 0 &&
+    binaries.every((m) => m.status === "settled" || m.status === "void")
+  );
+}
+
+/**
+ * Corrects a stale live/scheduled status with "ft" once the match has concluded
+ * (see matchConcluded). A no-op when the match isn't concluded or is already ft.
+ */
+export function reconcileMatchStatus(match: Match, concluded: boolean): Match {
+  return concluded && match.status !== "ft" ? { ...match, status: "ft" } : match;
 }

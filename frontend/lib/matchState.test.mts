@@ -8,8 +8,8 @@
 // odds/score tick must never fabricate LIVE, and a finished match must never
 // regress to live).
 
-import { applyMatchState } from "./matchState.ts";
-import type { Match } from "./types.ts";
+import { applyMatchState, matchConcluded, reconcileMatchStatus } from "./matchState.ts";
+import type { MarketStatus, Match } from "./types.ts";
 
 const base: Match = {
   id: "m1",
@@ -73,6 +73,27 @@ ok(
 ok(
   "event without fixture_id still applies kickoff",
   applyMatchState(base, { data: { event: "kickoff" } }).status === "live"
+);
+
+// matchConcluded / reconcileMatchStatus — correcting a stale backend status
+// from the authoritative market resolutions.
+const mkt = (type: "binary" | "precision", status: MarketStatus) => ({ type, status });
+ok(
+  "all binary markets settled -> concluded",
+  matchConcluded([mkt("binary", "settled"), mkt("binary", "void"), mkt("precision", "open")]) === true
+);
+ok(
+  "one binary still open (live 2nd half w/ 1H settled) -> NOT concluded",
+  matchConcluded([mkt("binary", "settled"), mkt("binary", "open")]) === false
+);
+ok("no binary markets -> NOT concluded", matchConcluded([mkt("precision", "settled")]) === false);
+ok(
+  "reconcile: concluded overrides a stale live -> ft",
+  reconcileMatchStatus({ ...base, status: "live" }, true).status === "ft"
+);
+ok(
+  "reconcile: not concluded leaves live untouched (same ref)",
+  reconcileMatchStatus({ ...base, status: "live" }, false).status === "live"
 );
 
 console.log(fail === 0 ? "\nALL PASS" : `\n${fail} FAILURES`);

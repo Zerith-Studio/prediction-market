@@ -9,6 +9,7 @@ function periodLabel(p?: string): string | null {
 
 export function MatchHero({ match }: { match: Match }) {
   const live = match.status === "live" || match.status === "ht";
+  const finished = match.status === "ft";
   const { minute, period, home_score = 0, away_score = 0 } = match.live_state;
 
   // Build "LIVE · <period> · <minute>'" from only the parts we actually have,
@@ -30,7 +31,7 @@ export function MatchHero({ match }: { match: Match }) {
             <span className="h-[7px] w-[7px] rounded-full bg-down animate-live-pulse-down" aria-hidden />
           )}
           <span className={live ? "text-down" : "text-dim"}>
-            {live ? liveLabel : "SCHEDULED"}
+            {live ? liveLabel : finished ? "FULL TIME" : "SCHEDULED"}
           </span>
         </div>
         <div className="min-w-0 truncate eyebrow">

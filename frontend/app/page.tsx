@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, configured } from "@/lib/api";
+import { matchConcluded } from "@/lib/matchState";
 import type { Market, Match, NewsItem } from "@/lib/types";
 import { TopBar } from "@/components/TopBar";
 import { FlagPair } from "@/components/TeamFlag";
@@ -150,10 +151,14 @@ function GlobalMarketsSection({ markets }: { markets: Market[] }) {
 }
 
 function MatchSection({ match, markets }: { match: Match; markets: Market[] }) {
-  const live = match.status === "live";
   const kickoff = new Date(match.kickoff_at);
   const binaries = markets.filter((m) => m.type === "binary");
   const pools = markets.filter((m) => m.type === "precision");
+  // All binary markets resolved ⇒ the match is over, even if the feed status is
+  // a stale "live". Correct it to FT here (matchConcluded is match-wide, so a
+  // genuinely live match with only its 1H markets settled still reads live).
+  const status = matchConcluded(markets) ? "ft" : match.status;
+  const live = status === "live";
 
   return (
     <section className="rule-t py-6">
@@ -170,7 +175,7 @@ function MatchSection({ match, markets }: { match: Match; markets: Market[] }) {
               <span className="mr-1.5 inline-block h-[6px] w-[6px] rounded-full bg-down align-middle animate-live-pulse-down" />
               LIVE · {match.live_state.home_score}–{match.live_state.away_score}
             </span>
-          ) : match.status === "ft" ? (
+          ) : status === "ft" ? (
             <span className="text-dim">
               FT · {match.live_state.home_score}–{match.live_state.away_score}
             </span>
