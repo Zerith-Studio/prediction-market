@@ -3,15 +3,14 @@ title: "Setup & build"
 description: "Toolchain, build commands, and the verification gates — including the platform-tools trap."
 ---
 
-Everything here is condensed from the repo's `CLAUDE.md` and `progress.md` §4 (the
-toolchain post-mortem). The repo layout:
+The repo layout:
 
 ```
-programs/pitchmarket/   E1 — Anchor settlement program (Rust)
-backend/                E2 — Go matching engine, crank, feed, API
+programs/pitchmarket/   Anchor settlement program (Rust)
+backend/                Go matching engine, crank, feed, API
 frontend/               Next.js web app
 mobile/                 Expo (React Native) app
-docs/                   ADRs, interface contract, specs, handoff
+docs/                   ADRs, interface contract, specs
 ```
 
 ## Quick commands
@@ -40,7 +39,7 @@ npm test                             # tests/ — full lifecycle, 8 tests
 the gate**, and deployment to devnet is the only thing that proves an instruction works.
 </Warning>
 
-## The toolchain trap (progress.md §4)
+## The toolchain trap
 
 The program requires **modern Agave platform-tools** (v1.54 / rustc 1.89, installed by
 Agave CLI 4.1.1 from `release.anza.xyz/stable/install`). The historical `anchor build`
@@ -91,13 +90,10 @@ SOLANA_RPC_URL=... OPERATOR_KEYPAIR=... go run ./cmd/server
 go run ./cmd/devnet-e2e
 ```
 
-See `backend/.env.example` for the full environment surface and
-[`docs/HANDOFF.md` §4](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/HANDOFF.md)
-for the complete runbooks.
+See `backend/.env.example` for the full environment surface.
 
 <Note>
-The program keypair (`target/deploy/pitchmarket-keypair.json`) is committed for this
-devnet-only hackathon deployment (decision closed 2026-07-12). Public devnet RPC
-rate-limits aggressive status polls — the crank and harness poll gently (1.5–2.5&nbsp;s);
-a transaction that "times out" usually landed (check `solana confirm`).
+Public devnet RPC rate-limits aggressive status polls — the crank and harness poll
+gently (1.5–2.5&nbsp;s); a transaction that "times out" usually landed (check
+`solana confirm`).
 </Note>

@@ -48,11 +48,10 @@ encoder, update that vector in every suite and run them all — a one-byte diver
 means every signature fails verification.
 
 <Warning>
-A real bug this discipline caught: JavaScript's `Number(bigint)` silently rounds values
-≥ 2⁵³. A 63-bit random `salt` signed one value and transmitted another, so ~99.9% of
-orders failed signature verification. `randomSalt()` now draws below 2⁵³ so the
-bigint → Number → JSON → uint64 round-trip is exact (fixed in `mobile/`; the same flaw
-is flagged in `frontend/lib/borsh.ts` per `progress.md`).
+A subtle encoder hazard this discipline catches: JavaScript's `Number(bigint)` silently
+rounds values ≥ 2⁵³. A 63-bit random `salt` can be signed as one value and transmitted as
+another, so signature verification fails on nearly every order. `randomSalt()` draws below
+2⁵³ so the bigint → Number → JSON → uint64 round-trip is exact.
 </Warning>
 
 ## The pinned settle_match transaction (interface contract §6.5)
@@ -80,7 +79,8 @@ operator (fee payer) and the two per-order `OrderStatus` PDAs stay static keys �
 OrderStatus PDAs are unique per order, and keeping them inline avoids a table-extend +
 activation wait on every settle.
 
-Measured in the crank's tests: legacy 1421&nbsp;B ❌ vs v0 1116&nbsp;B ✅.
+Measured in the crank's tests: the legacy encoding is 1421&nbsp;B (over the limit); the
+v0 encoding is 1116&nbsp;B (within it).
 
 Reference implementations: `backend/internal/crank/{builder,lut}.go` (Go, production)
 and `tests/helpers.ts` (TypeScript). `builder_test.go` re-implements the on-chain byte

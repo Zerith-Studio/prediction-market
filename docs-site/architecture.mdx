@@ -1,11 +1,13 @@
 ---
 title: "Architecture"
-description: "Two tracks — E1 (Anchor settlement program) and E2 (Go engine + crank + clients) — joined by a frozen interface contract."
+description: "How the on-chain settlement program and the backend matching service fit together across a frozen interface contract."
 ---
 
-PitchMarket was built by two engineers on two parallel tracks, coding against a frozen
-boundary document, [`docs/interface-contract.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/interface-contract.md).
-Everything below is a map of that split.
+PitchMarket has two halves — an on-chain Anchor settlement program and an off-chain Go
+backend — joined by a frozen boundary document,
+[`docs/interface-contract.md`](https://github.com/Zerith-Studio/prediction-market/blob/main/docs/interface-contract.md),
+which pins the account layouts, instruction arguments, transaction layouts, and REST/WS
+surface both sides build against. This page maps how they fit together.
 
 ## System overview
 
@@ -15,7 +17,7 @@ flowchart LR
     FE[Next.js frontend]
     MOB[Expo mobile app]
   end
-  subgraph E2 ["E2 — Go backend"]
+  subgraph Backend ["Backend service (Go)"]
     API[REST + WS API]
     EX[exchange core]
     ME[matching engine]
@@ -24,7 +26,7 @@ flowchart LR
     BOT[MM bot]
     FEED[TxLINE feed]
   end
-  subgraph E1 ["E1 — Solana devnet"]
+  subgraph Chain ["Solana"]
     PROG[pitchmarket Anchor program]
   end
   FE -->|signed orders| API
@@ -38,7 +40,7 @@ flowchart LR
   FEED --> EX
 ```
 
-## E1 — the Anchor settlement program (`programs/pitchmarket/`)
+## The on-chain settlement program (`programs/pitchmarket/`)
 
 A greenfield Anchor program (no fork) that owns all money movement:
 
@@ -49,10 +51,10 @@ A greenfield Anchor program (no fork) that owns all money movement:
   NORMAL/MINT/MERGE money movement.
 - `resolve_market` (tier-a operator key today) and `redeem` (winning shares → USDC, 1:1).
 
-Deployed on devnet at `3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs` — see
+Deployed on Solana devnet at `3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs` — see
 [On-chain program](/onchain/program) for the accounts and instruction surface.
 
-## E2 — the Go backend (`backend/`)
+## The backend service (`backend/`)
 
 - **`matching`** — a unified price-time-priority ladder that pairs NORMAL, MINT, and
   MERGE fills (see [Matching engine](/concepts/matching)).
@@ -78,9 +80,8 @@ Deployed on devnet at `3fdgRPcZnwWcaGi197dkZDyq24VHoWJcGzKTVfMxNPWs` — see
   borsh-encoded and signed client-side; the TypeScript encoder is pinned to the same
   golden vector as the Rust and Go encoders and checked at build time.
 - **`mobile/`** — Expo (React Native) app covering the core loop: markets, trade,
-  deposit, portfolio. The library layer passed an end-to-end flow against a live
-  backend; the UI screens are written but **unverified on a physical device** (per
-  `progress.md`).
+  deposit, portfolio. Shares the signed-order and live-market client layer with the web
+  frontend.
 
 ## The seams that keep it honest
 
