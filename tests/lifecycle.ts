@@ -113,4 +113,39 @@ describe("pitchmarket lifecycle", () => {
     assert.equal(await env.bal(env.ata(market.yesMint, aliceVault)), 0n, "alice YES burned");
     assert.equal(await env.bal(market.poolUsdc), 40_000_000n, "pool after alice redeem");
   });
+
+  it("redeem rejects a mismatched outcome_mint (cannot redeem losing NO shares by claiming YES)", async () => {
+    // Bob holds 100 real NO shares from the earlier MINT (a losing position now
+    // that the market resolved YES). Without binding outcome_mint to the
+    // claimed `outcome`, he could pass outcome=YES (the winning value) while
+    // supplying his own NO mint/ATA and drain the pool 1:1 for worthless shares.
+    const bobVault = env.vaultPda(bob.publicKey);
+    const bobWalletUsdc = env.ata(env.usdcMint, bob.publicKey);
+    const poolBefore = await env.bal(market.poolUsdc);
+
+    let threw = false;
+    try {
+      await env.program.methods
+        .redeem(OUTCOME_YES, new anchor.BN(60))
+        .accountsPartial({
+          market: market.market,
+          vault: bobVault,
+          outcomeMint: market.noMint,
+          userOutcomeAta: env.ata(market.noMint, bobVault),
+          poolUsdc: market.poolUsdc,
+          userUsdcAta: bobWalletUsdc,
+          user: bob.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([bob])
+        .rpc();
+    } catch (e: any) {
+      threw = true;
+      const blob = JSON.stringify(e.logs ?? e.message ?? e);
+      assert.match(blob, /OutcomeMintMismatch|does not match the market's mint|6014/, "expected OutcomeMintMismatch");
+    }
+    assert.isTrue(threw, "redeem with a mismatched outcome_mint must revert");
+    assert.equal(await env.bal(market.poolUsdc), poolBefore, "pool must be untouched by the rejected redeem");
+    assert.equal(await env.bal(env.ata(market.noMint, bobVault)), 100n, "bob's NO shares must be untouched");
+  });
 });

@@ -22,7 +22,7 @@ pub fn resolve_market_handler(ctx: Context<ResolveMarket>, outcome: u8) -> Resul
         0 => MarketOutcome::No,
         1 => MarketOutcome::Yes,
         2 => MarketOutcome::Void,
-        _ => return err!(PitchMarketError::NotImplemented),
+        _ => return err!(PitchMarketError::InvalidOutcome),
     };
     market.resolved_at = Clock::get()?.unix_timestamp;
     Ok(())

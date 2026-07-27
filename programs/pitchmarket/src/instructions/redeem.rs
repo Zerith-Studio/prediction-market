@@ -11,9 +11,23 @@ use crate::MICRO_PER_SHARE;
 pub fn redeem_handler(ctx: Context<Redeem>, outcome: u8, amount: u64) -> Result<()> {
     let market = &ctx.accounts.market;
     require!(market.outcome != MarketOutcome::Unresolved, PitchMarketError::MarketNotResolved);
+
+    // SECURITY: bind the caller-supplied `outcome_mint` account to the
+    // caller-supplied `outcome` byte via the market's own mints — without this,
+    // `outcome` and `outcome_mint` were never cross-checked, so a holder of the
+    // LOSING side's shares could pass `outcome = <winning value>` alongside
+    // `outcome_mint = <the mint they actually hold>` and drain the pool 1:1 for
+    // worthless shares.
+    let expected_mint = match outcome {
+        OUTCOME_NO => market.no_mint,
+        OUTCOME_YES => market.yes_mint,
+        _ => return err!(PitchMarketError::InvalidOutcome),
+    };
+    require_keys_eq!(ctx.accounts.outcome_mint.key(), expected_mint, PitchMarketError::OutcomeMintMismatch);
+
     if market.outcome != MarketOutcome::Void {
         let winning_outcome = if market.outcome == MarketOutcome::Yes { OUTCOME_YES } else { OUTCOME_NO };
-        require!(outcome == winning_outcome, PitchMarketError::MarketNotOpen);
+        require!(outcome == winning_outcome, PitchMarketError::NotWinningOutcome);
     }
 
     let burn_accounts = Burn {

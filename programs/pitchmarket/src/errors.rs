@@ -28,4 +28,10 @@ pub enum PitchMarketError {
     TooManyLegs,
     #[msg("this instruction path is not yet implemented — see TODO in source")]
     NotImplemented,
+    #[msg("outcome must be 0 (NO) or 1 (YES)")]
+    InvalidOutcome,
+    #[msg("outcome_mint does not match the market's mint for the given outcome")]
+    OutcomeMintMismatch,
+    #[msg("outcome is not the market's winning outcome")]
+    NotWinningOutcome,
 }
