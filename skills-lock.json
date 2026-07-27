@@ -1,4 +1,4 @@
-{
+  {
   "version": 1,
   "skills": {
     "grill-with-docs": {
@@ -6,6 +6,18 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/grill-with-docs/SKILL.md",
       "computedHash": "e7ef25bbee50cda2eb7b3a8ef541db0a0396dad7d369f7d14fb610671dd1864b"
+    },
+    "safe-solana-builder": {
+      "source": "frankcastleauditor/safe-solana-builder",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "37f440deaa648ad5acd66f69e44833da3db380c9da599210e9a2320522d2be9b"
+    },
+    "solana-vulnerability-scanner": {
+      "source": "trailofbits/skills",
+      "sourceType": "github",
+      "skillPath": "plugins/building-secure-contracts/skills/solana-vulnerability-scanner/SKILL.md",
+      "computedHash": "06789074422403f707f0be218a770fe55e444c57d2f5ad367afe578a0aea2f6a"
     }
   }
 }
