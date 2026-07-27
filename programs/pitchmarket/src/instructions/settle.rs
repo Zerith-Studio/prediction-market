@@ -3,6 +3,7 @@ use anchor_lang::solana_program::sysvar::instructions::ID as IX_SYSVAR_ID;
 use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer};
 
 use crate::errors::PitchMarketError;
+use crate::instructions::orders::ensure_order_status_initialized;
 use crate::sig_verify;
 use crate::state::*;
 use crate::MICRO_PER_CENT;
@@ -75,11 +76,7 @@ pub fn settle_match_handler(
 }
 
 fn apply_order_fill(status: &mut OrderStatus, order: &OrderArgs, fill_size: u64, bump: u8) -> Result<()> {
-    if status.order_hash == [0u8; 32] {
-        status.order_hash = sig_verify::order_hash(order);
-        status.remaining = order.size;
-        status.bump = bump;
-    }
+    ensure_order_status_initialized(status, order, bump);
     require!(!status.is_filled_or_cancelled, PitchMarketError::OrderClosed);
     require!(status.remaining >= fill_size, PitchMarketError::OverFill);
     status.remaining -= fill_size;

@@ -38,8 +38,8 @@ pub mod pitchmarket {
     }
 
     /// Maker directly signs this tx to cancel (interface-contract.md §4).
-    pub fn cancel_order(ctx: Context<CancelOrder>, order_hash: [u8; 32]) -> Result<()> {
-        cancel_order_handler(ctx, order_hash)
+    pub fn cancel_order(ctx: Context<CancelOrder>, order: OrderArgs) -> Result<()> {
+        cancel_order_handler(ctx, order)
     }
 
     pub fn settle_match(

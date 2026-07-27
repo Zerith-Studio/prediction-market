@@ -10,7 +10,7 @@ import {
   SIDE_SELL,
   MATCH_MINT,
   MATCH_MERGE,
-  orderHash,
+  toArg,
   randomMarketId,
   futureExpiry,
 } from "./helpers";
@@ -83,9 +83,34 @@ describe("cancel_order", () => {
   const expiry = futureExpiry();
   const frankOrder: Order = { maker: frank.publicKey, marketId, outcome: OUTCOME_NO, side: SIDE_BUY, price: 40, size: 100n, feeBps: 0, expiry, salt: 20n };
 
+  it("a non-maker cannot cancel someone else's order", async () => {
+    const attacker = Keypair.generate();
+    await env.fund(attacker);
+
+    let threw = false;
+    try {
+      // attacker signs as `maker`, but the order itself belongs to frank —
+      // order hashes are public (book/API/WS), so this is the exact attack
+      // the maker-key check in cancel_order_handler must block.
+      await env.program.methods
+        .cancelOrder(toArg(frankOrder))
+        .accountsPartial({ orderStatus: env.ostatusPda(frankOrder), maker: attacker.publicKey, systemProgram: SystemProgram.programId })
+        .signers([attacker])
+        .rpc();
+    } catch (e: any) {
+      threw = true;
+      const blob = JSON.stringify(e.logs ?? e.message ?? e);
+      assert.match(blob, /Unauthorized|configured resolver|6009/, "expected an authorization failure");
+    }
+    assert.isTrue(threw, "a non-maker cancelling someone else's order must fail");
+
+    const st = await (env.program.account as any).orderStatus.fetchNullable(env.ostatusPda(frankOrder));
+    assert.isTrue(st === null || st.isFilledOrCancelled === false, "order must not have been cancelled by the attacker");
+  });
+
   it("maker cancels their own order and the status flips to closed", async () => {
     await env.program.methods
-      .cancelOrder(Array.from(orderHash(frankOrder)))
+      .cancelOrder(toArg(frankOrder))
       .accountsPartial({ orderStatus: env.ostatusPda(frankOrder), maker: frank.publicKey, systemProgram: SystemProgram.programId })
       .signers([frank])
       .rpc();

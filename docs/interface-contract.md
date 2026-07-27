@@ -72,7 +72,13 @@ initialize_market(market_id, template_meta)         → creates Market + yes_min
 settle_match(taker: Order+sig, makers: []Order+sig, match_type, fills[])
      match_type ∈ {NORMAL, MINT, MERGE}; verifies sigs, checks/decrements OrderStatus.remaining,
      moves USDC/shares per §1 rules, mints (MINT) / merges (MERGE). Operator is fee payer.
-cancel_order(order_hash, maker_sig)                 → sets OrderStatus.is_filled_or_cancelled
+cancel_order(order: Order)                          → maker is a direct on-chain Signer (not a
+     relayed ed25519 sig — this is the one instruction the maker submits themselves, no operator
+     relay); `order.maker` must equal the signer, checked on-chain (PitchMarketError::Unauthorized
+     otherwise). The OrderStatus PDA seed is `["ostatus", hash(order)]`, computed on-chain from the
+     full `order` arg passed in — never take a bare `order_hash` here, order hashes are public
+     (book/API/WS) and a bare-hash instruction can't verify the caller owns the order it names.
+     Sets OrderStatus.is_filled_or_cancelled.
 combo_accept(quote: ComboQuote+sig, taker_sig)      → verify sig+expiry+QuoteStatus.!spent;
      pull stake from taker, payout-stake from MM vault → ComboEscrow; mark QuoteStatus.spent
 resolve_market(market_id, outcome, oracle_proof)    → tier a: resolver key | tier b: post+window
